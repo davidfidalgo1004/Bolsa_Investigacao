@@ -1,90 +1,70 @@
-# Importando as bibliotecas necessárias
-from mesa import Agent, Model
-from mesa.time import RandomActivation
-from mesa.space import MultiGrid
-from mesa.datacollection import DataCollector
-from mesa.visualization.modules import CanvasGrid
-from mesa.visualization.ModularVisualization import ModularVisualization
+import mesa
+# Ferramentas de visualização de dados
+import seaborn as sns
+# Possui matrizes e matrizes multidimensionais.
+# Possui uma grande coleção de funções matemáticas para operar nessas matrizes.
+import numpy as np
+import matplotlib.pyplot as plt
+# Manipulação e análise de dados. 
+#import panda as pd
 
-# Definição do Agente
-class FireAgent(Agent):
-    """ Um agente que pode estar em um estado de fogo ou não """
-    def __init__(self, unique_id, model):
-        super().__init__(unique_id, model)
-        self.fighting_fire = False  # Se o agente está combatendo o fogo
 
-    def step(self):
-        """ O agente alterna entre combater o fogo ou não """
-        if self.fighting_fire:
-            self.fighting_fire = False  # Desliga o combate ao fogo
-        else:
-            self.fighting_fire = True  # Liga o combate ao fogo
+class MoneyAgent(mesa.Agent):
+    """An agent with fixed initial wealth."""
 
-# Definição do Modelo
-class FireModel(Model):
-    """ Modelo de incêndio simples com uma grade e agentes """
-    def __init__(self, width=10, height=10, num_agents=5):
-        self.num_agents = num_agents
-        self.grid = MultiGrid(width, height, True)
-        self.schedule = RandomActivation(self)
+    def __init__(self, model):
+        super().__init__(model)
+        self.wealth = 1
 
-        # Criando os agentes
-        for i in range(self.num_agents):
-            a = FireAgent(i, self)
-            self.schedule.add(a)
-
-            # Colocando os agentes aleatoriamente na grid
-            x = self.random.randrange(self.grid.width)
-            y = self.random.randrange(self.grid.height)
-            self.grid.place_agent(a, (x, y))
-
-        # Inicializando o DataCollector para coletar dados dos agentes
-        self.datacollector = DataCollector(
-            agent_reporters={"FightingFire": "fighting_fire"}
+    def move(self):
+        possible_steps = self.model.grid.get_neighborhood(
+            self.pos, moore=True, include_center=False
         )
+        new_position = self.random.choice(possible_steps)
+        self.model.grid.move_agent(self, new_position)
+
+    def give_money(self):
+        cellmates = self.model.grid.get_cell_list_contents([self.pos])
+        # Ensure agent is not giving money to itself
+        cellmates.pop(cellmates.index(self))
+        if len(cellmates) > 0:
+            other_agent = self.random.choice(cellmates)
+            other_agent.wealth += 1
+            self.wealth -= 1
+
+
+class MoneyModel(mesa.Model):
+    """A model with some number of agents."""
+
+    def __init__(self, n, width, height, seed=None):
+        super().__init__(seed=seed)
+        self.num_agents = n
+        self.grid = mesa.space.MultiGrid(width, height, True)
+
+        # Create agents
+        agents = MoneyAgent.create_agents(model=self, n=n)
+        # Create x and y coordinates for agents
+        x = self.rng.integers(0, self.grid.width, size=(n,))
+        y = self.rng.integers(0, self.grid.height, size=(n,))
+        for a, i, j in zip(agents, x, y):
+            # Add the agent to a random grid cell
+            self.grid.place_agent(a, (i, j))
 
     def step(self):
-        """ Avança o modelo em um passo """
-        self.datacollector.collect(self)
-        self.schedule.step()
+        self.agents.shuffle_do("move")
+        self.agents.do("give_money")
 
-# Função para representar os agentes na interface
-def agent_portrayal(agent):
-    if agent.fighting_fire:
-        portrayal = {
-            "Shape": "rect",
-            "w": 1,
-            "h": 1,
-            "Filled": "true",
-            "Color": "red",  # Cor quando combatendo fogo
-            "Layer": 0
-        }
-    else:
-        portrayal = {
-            "Shape": "rect",
-            "w": 1,
-            "h": 1,
-            "Filled": "true",
-            "Color": "green",  # Cor quando não combatendo fogo
-            "Layer": 0
-        }
-    return portrayal
+        
+model = MoneyModel(100, 10, 10)
+for _ in range(20):
+    model.step()
 
-# Configuração da interface gráfica
-grid = CanvasGrid(agent_portrayal, 10, 10, 500, 500)  # Tamanho da grid
-
-# Criando o servidor da interface com a nova classe 'ModularVisualization'
-model_params = {
-    "width": 10,  # Largura da grid
-    "height": 10,  # Altura da grid
-    "num_agents": 5  # Número de agentes
-}
-
-# Configurando o servidor de visualização
-visualization = ModularVisualization(
-    FireModel, 
-    [grid], 
-    model_params=model_params
-)
-visualization.port = 8521  # Definindo a porta para o servidor
-visualization.launch()  # Lançando o servidor
+agent_counts = np.zeros((model.grid.width, model.grid.height))
+for cell_content, (x, y) in model.grid.coord_iter():
+    agent_count = len(cell_content)
+    agent_counts[x][y] = agent_count
+# Plot using seaborn, with a visual size of 5x5
+g = sns.heatmap(agent_counts, cmap="viridis", annot=True, cbar=False, square=True)
+g.figure.set_size_inches(5, 5)
+g.set(title="number of agents on each cell of the grid")
+plt.show()
