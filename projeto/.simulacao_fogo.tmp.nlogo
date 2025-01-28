@@ -1,119 +1,4 @@
-globals [
-  initial-trees   ;; número inicial de árvores (patches verdes)
-  burned-trees    ;; número de árvores queimadas até agora
-  co-level        ;; nível de Monóxido de Carbono (CO) em ppm
-  co2-level       ;; nível de Dióxido de Carbono (CO2) em ppm
-  pm2_5-level     ;; nível de partículas finas (PM2.5) em µg/m³
-  pm10-level      ;; nível de partículas maiores (PM10) em µg/m³
-  o2-level        ;; concentração de Oxigênio (O2) em ppm
-  wind-speed      ;; velocidade do vento
-  wind-direction  ;; direção do vento (em graus)
-]
 
-breed [fires fire]    ;; tartarugas vermelhas que representam o fogo
-breed [embers ember]  ;; tartarugas que representam as brasas (ficam escuras)
-
-to setup
-  clear-all
-  set-default-shape turtles "square"
-  ;; cria árvores verdes com base na densidade
-  ask patches with [(random-float 100) < density]
-    [ set pcolor green ]
-  ;; escolhe um patch aleatório para começar o fogo
-  let random-patch one-of patches with [pcolor = green]
-  ask random-patch [ ignite ]
-  ;; inicializa os níveis de gases e partículas
-  set co-level 0.1       ;; concentração inicial de CO em ppm
-  set co2-level 400      ;; concentração inicial de CO2 em ppm
-  set pm2_5-level 10     ;; concentração inicial de PM2.5 em µg/m³
-  set pm10-level 20      ;; concentração inicial de PM10 em µg/m³
-  set o2-level 21000     ;; concentração inicial de O2 em ppm (equivalente a 21%)
-  ;; inicializa a direção e velocidade do vento
-  set wind-speed 3       ;; velocidade do vento inicial (ajustável)
-  set wind-direction 90  ;; direção do vento inicial (ajustável, 90 graus = Leste)
-  ;; define a contagem inicial de árvores
-  set initial-trees count patches with [pcolor = green]
-  set burned-trees 0
-  reset-ticks
-end
-
-to go
-  if not any? turtles  ;; se não houver mais fogo ou brasas
-    [ stop ]
-  ask fires [
-    spread-fire
-  ]
-  fade-embers
-  update-air-composition
-  tick
-end
-
-to spread-fire
-  ;; Encontra os vizinhos que são árvores verdes
-  let green-neighbors neighbors4 with [pcolor = green]
-  ;; Separa vizinhos favorecidos pelo vento e os outros
-  let favored-neighbors green-neighbors with [wind-favor?]
-  let other-neighbors green-neighbors with [not wind-favor?]
-
-  ;; Propaga o fogo com maior probabilidade para vizinhos favorecidos pelo vento
-  if any? favored-neighbors [
-    ask favored-neighbors [
-      if random-float 1 < calc-wind-probability wind-speed [
-        ignite
-      ]
-    ]
-  ]
-  ;; Propaga o fogo para outros vizinhos com menor probabilidade
-  if any? other-neighbors [
-    ask other-neighbors [
-      if random-float 1 < 0.4 [ ignite ]  ;; menor probabilidade para vizinhos não favorecidos
-    ]
-  ]
-  ;; Transforma o fogo atual em brasas
-  set breed embers
-end
-
-to-report wind-favor?
-  let angle-to-neighbor towards myself  ;; direção do vizinho em relação ao patch atual
-  let angle-diff abs (wind-direction - angle-to-neighbor)
-  report angle-diff <= 60 or angle-diff >= 300  ;; aumenta o cone de influência do vento para 120 graus
-end
-
-to-report calc-wind-probability [speed]
-  ;; Calcula a probabilidade de propagação com base na velocidade do vento
-  ;; Probabilidade mínima é 0.6 (60%), máxima é 1.0 (100%)
-  report min (list (0.6 + (speed * 0.1)) 1.0)
-end
-
-to ignite
-  sprout-fires 1 [
-    set color red  ;; cria uma tartaruga de fogo
-  ]
-  set pcolor black     ;; marca o patch como queimado
-  set burned-trees burned-trees + 1
-end
-
-to fade-embers
-  ask embers [
-    set color color - 0.5  ;; escurece mais rápido
-    if color < red - 2.0 [  ;; diminui o tempo de vida das brasas
-      set pcolor color
-      die
-    ]
-  ]
-end
-
-to update-air-composition
-  ;; Incrementa os níveis de gases e partículas com base no número de árvores queimadas neste tick
-  let new-burned count turtles with [breed = fires] ;; árvores queimadas no tick atual
-
-  ;; Ajuste dos cálculos:
-  set co-level co-level + (new-burned * 0.1)
-  set co2-level co2-level + (new-burned * 10)
-  set pm2_5-level pm2_5-level + (new-burned * 5)
-  set pm10-level pm10-level + (new-burned * 5)
-  set o2-level max (list (o2-level - (new-burned * 0.2)) 15000)  ;; O2 não pode cair abaixo de 15.000 ppm
-end
 @#$#@#$#@
 GRAPHICS-WINDOW
 200
@@ -203,25 +88,25 @@ NIL
 1
 
 SLIDER
-16
-186
-188
-219
+13
+295
+185
+328
 wind-direction
 wind-direction
 0
 359
-359.0
+358.0
 1
 1
-NIL
+º
 HORIZONTAL
 
 TEXTBOX
-31
-289
-181
-345
+17
+398
+167
+454
 0º-> SUL\n90º-> OESTE\n180º-> NORTE\n270º-> ESTE\n
 11
 0.0
@@ -283,18 +168,33 @@ pm10-level
 11
 
 SLIDER
-14
-238
-186
-271
+11
+347
+183
+380
 wind-speed
 wind-speed
 0
-100
-52.0
+20
+14.0
 1
 1
 m/s
+HORIZONTAL
+
+SLIDER
+16
+242
+188
+275
+humidity
+humidity
+0
+100
+50.0
+1
+1
+%
 HORIZONTAL
 
 @#$#@#$#@
