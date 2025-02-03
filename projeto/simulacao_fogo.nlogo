@@ -79,10 +79,6 @@ to go
 
   ask animals [ react-to-fire ]
 
-  if ticks mod 5 = 0 [
-    show (word "Total de animais que saíram da tela: " escaped-animals)
-    show (word "Norte: " escaped-north " | Sul: " escaped-south " | Leste: " escaped-east " | Oeste: " escaped-west)
-  ]
 
   if not any? fires [
     set fire-end-tick fire-end-tick + 1 ;; Marca o tick em que o incêndio terminou
