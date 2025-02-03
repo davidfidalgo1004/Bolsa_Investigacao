@@ -8,8 +8,14 @@ globals [
   o2-level            ;; Concentração de Oxigênio (O2) em ppm
 
   trees-to-reforest   ;; Número de árvores a reflorestar (para reforest)
+  escaped-animals     ;; Contador total de animais que saíram da tela
+  escaped-north       ;; Contador de animais que saíram pelo topo (norte)
+  escaped-south       ;; Contador de animais que saíram pela base (sul)
+  escaped-east        ;; Contador de animais que saíram pelo lado direito (leste)
+  escaped-west        ;; Contador de animais que saíram pelo lado esquerdo (oeste)
+  fire-end-tick       ;; Tick em que o incêndio terminou
 
-  ;; Novas variáveis para armazenar os valores iniciais dos índices de ar
+  ;; Variáveis para armazenar os índices iniciais de ar
   initial-co-level
   initial-co2-level
   initial-pm2_5-level
@@ -17,76 +23,151 @@ globals [
   initial-o2-level
 ]
 
-breed [fires fire]    ;; Tartarugas vermelhas que representam o fogo
-breed [embers ember]  ;; Tartarugas que representam as brasas (ficam escuras)
+breed [fires fire]    ;; Tartarugas que representam o fogo
+fires-own [burn-time] ;; Tempo que o fogo queimará antes de virar brasa
 
+breed [embers ember]  ;; Tartarugas que representam as brasas
+breed [animals animal] ;; Tartarugas que representam animais
+
+;; Configuração inicial
 to setup
   clear-all
   set-default-shape turtles "square"
 
-  ;; Inicialização das variáveis com valores padrão caso os sliders não estejam presentes
-  if not (is-number? density) [ set density 50 ]        ;; Densidade padrão: 50%
-  if not (is-number? wind-speed) [ set wind-speed 1 ]  ;; Velocidade do vento padrão: 1
-  if not (is-number? wind-direction) [ set wind-direction 0 ] ;; Direção do vento padrão: 0 graus (Norte)
+  if not (is-number? density) [ set density 50 ]
+  if not (is-number? wind-speed) [ set wind-speed 1 ]
+  if not (is-number? wind-direction) [ set wind-direction 0 ]
 
-  ;; Cria árvores verdes com base na densidade
-  ask patches with [(random-float 100) < density] [
+  ask patches with [(random-float 100) < density and pcolor != blue] [
     set pcolor green
   ]
 
-  ;; Removido: ignição inicial do fogo
+  set co-level 0.1
+  set co2-level 400
+  set pm2_5-level 10
+  set pm10-level 20
+  set o2-level 21000
 
-  ;; Inicializa os níveis de gases e partículas
-  set co-level 0.1       ;; Concentração inicial de CO em ppm
-  set co2-level 400      ;; Concentração inicial de CO2 em ppm
-  set pm2_5-level 10     ;; Concentração inicial de PM2.5 em µg/m³
-  set pm10-level 20      ;; Concentração inicial de PM10 em µg/m³
-  set o2-level 21000     ;; Concentração inicial de O2 em ppm (equivalente a 21%)
-
-  ;; Armazena os valores iniciais para recuperação futura
   set initial-co-level co-level
   set initial-co2-level co2-level
   set initial-pm2_5-level pm2_5-level
   set initial-pm10-level pm10-level
   set initial-o2-level o2-level
 
-  ;; Define a contagem inicial de árvores
   set initial-trees count patches with [pcolor = green]
   set burned-trees 0
+  set escaped-animals 0
+  set escaped-north 0
+  set escaped-south 0
+  set escaped-east 0
+  set escaped-west 0
+  set fire-end-tick -1 ;; Inicializa a variável que controla quando o incêndio terminou
+
+  create-animals 800 [
+    set color brown
+    setxy random-xcor random-ycor
+    set size 3
+  ]
+
   reset-ticks
 end
 
 to go
-  ;; O 'go' agora sempre continua a executar a cada tick
-
-  ;; Propagar o fogo
-  ask fires [
-    spread-fire
-  ]
-
-  ;; Escurecer as brasas
+  ask fires [ spread-fire ]
   fade-embers
-
-  ;; Atualizar a composição do ar com base nos incêndios ativos
   update-air-composition
 
-  ;; Verificar se há incêndios ativos
+  ask animals [ react-to-fire ]
+
+  if ticks mod 5 = 0 [
+    show (word "Total de animais que saíram da tela: " escaped-animals)
+    show (word "Norte: " escaped-north " | Sul: " escaped-south " | Leste: " escaped-east " | Oeste: " escaped-west)
+  ]
+
   if not any? fires [
+    set fire-end-tick fire-end-tick + 1 ;; Marca o tick em que o incêndio terminou
     recover-air
+  ]
+
+  if fire-end-tick = 100 [
+    set escaped-animals 0 ;; Reseta o contador 100 ticks após o incêndio terminar
+    set escaped-north 0
+    set escaped-south 0
+    set escaped-east 0
+    set escaped-west 0
+    set fire-end-tick 0  ;; Reseta a variável para esperar o próximo incêndio
   ]
 
   tick
 end
 
+to react-to-fire
+  ;; Define os limites de percepção do fogo
+  let min-distance 1
+  let max-distance 100
+
+  ;; Encontra o fogo mais próximo
+  let nearest-fire min-one-of fires [distance myself]
+
+  ;; Verifica se existe um fogo próximo
+  if nearest-fire != nobody [
+    ;; Calcula a distância até ao fogo mais próximo
+    let dist-to-fire distance nearest-fire
+
+    ;; Verifica se a distância está dentro do intervalo definido
+    if dist-to-fire >= min-distance and dist-to-fire <= max-distance [
+      ;; Calcula a direção oposta ao fogo
+      let escape-direction (towards nearest-fire) + 180
+      set heading escape-direction
+      ;; Move-se para longe do fogo
+      fd 1
+
+      ;; Verifica se o animal saiu da tela e atualiza os contadores correspondentes
+      if xcor > max-pxcor [
+        set escaped-east escaped-east + 1
+        set escaped-animals escaped-animals + 1
+        die
+      ]
+      if xcor < min-pxcor [
+        set escaped-west escaped-west + 1
+        set escaped-animals escaped-animals + 1
+        die
+      ]
+      if ycor > max-pycor [
+        set escaped-north escaped-north + 1
+        set escaped-animals escaped-animals + 1
+        die
+      ]
+      if ycor < min-pycor [
+        set escaped-south escaped-south + 1
+        set escaped-animals escaped-animals + 1
+        die
+      ]
+    ] if dist-to-fire < min-distance or dist-to-fire > max-distance [
+      ;; Comportamento quando não há fogo nas proximidades ou está fora do intervalo
+      rt random 60
+      fd 1
+    ]
+  ] if nearest-fire = nobody [
+    ;; Comportamento quando não há fogo
+    rt random 60
+    fd 1
+  ]
+end
+
+
+
 to spread-fire
-  ;; Encontra os vizinhos que são árvores verdes
+  if burn-time > 0 [
+    set burn-time burn-time - 1
+    stop
+  ]
+
   let green-neighbors neighbors4 with [pcolor = green]
 
-  ;; Separa vizinhos favorecidos pelo vento e os outros
   let favored-neighbors green-neighbors with [wind-favor?]
   let other-neighbors green-neighbors with [not wind-favor?]
 
-  ;; Propaga o fogo com maior probabilidade para vizinhos favorecidos pelo vento
   if any? favored-neighbors [
     ask favored-neighbors [
       if random-float 1 < calc-wind-probability wind-speed [
@@ -95,45 +176,41 @@ to spread-fire
     ]
   ]
 
-  ;; Propaga o fogo para outros vizinhos com menor probabilidade
   if any? other-neighbors [
     ask other-neighbors [
-      if random-float 1 < 0.4 [ ignite ]  ;; Menor probabilidade para vizinhos não favorecidos
+      if random-float 1 < 0.3 [ ignite ]
     ]
   ]
 
-  ;; Transforma o fogo atual em brasas
   ask self [
     set breed embers
-    set color gray  ;; Opcional: Representa brasas com cor cinza
+    set color gray
   ]
 end
 
 to-report wind-favor?
-  let angle-to-neighbor towards myself  ;; Direção do vizinho em relação ao patch atual
+  let angle-to-neighbor towards myself
   let angle-diff abs (wind-direction - angle-to-neighbor)
-  ;; Ajuste para considerar a direção do vento dentro de um cone de 120 graus
   report (angle-diff <= 60) or (angle-diff >= 300)
 end
 
 to-report calc-wind-probability [speed]
-  ;; Calcula a probabilidade de propagação com base na velocidade do vento
-  ;; Probabilidade mínima é 0.6 (60%), máxima é 1.0 (100%)
-  report min list (0.6 + (speed * 0.1)) 1.0
+  report min list (0.3 + (speed * 0.05)) 0.8
 end
 
 to ignite
   sprout-fires 1 [
-    set color red  ;; Cria uma tartaruga de fogo
+    set color red
+    set burn-time 2 + random 4
   ]
-  set pcolor black     ;; Marca o patch como queimado
+  set pcolor black
   set burned-trees burned-trees + 1
 end
 
 to fade-embers
   ask embers [
-    set color color - 0.5  ;; Escurece mais rápido
-    if color < gray - 2.0 [  ;; Diminui o tempo de vida das brasas
+    set color color - 0.2
+    if color < gray - 1.5 [
       set pcolor color
       die
     ]
@@ -141,36 +218,27 @@ to fade-embers
 end
 
 to update-air-composition
-  ;; Incrementa os níveis de gases e partículas com base no número de árvores queimadas neste tick
-  let new-burned count fires ;; Árvores queimadas no tick atual
+  let new-burned count fires
 
-  ;; Ajuste dos cálculos:
   set co-level co-level + (new-burned * 0.1)
   set co2-level co2-level + (new-burned * 10)
   set pm2_5-level pm2_5-level + (new-burned * 5)
   set pm10-level pm10-level + (new-burned * 5)
-  set o2-level max list (o2-level - (new-burned * 0.2)) 15000  ;; O2 não pode cair abaixo de 15.000 ppm
+  set o2-level max list (o2-level - (new-burned * 0.2)) 15000
 end
 
 to start-fire
-  ;; Seleciona um patch verde aleatório para iniciar o fogo
   let random-patch one-of patches with [pcolor = green]
-
   if random-patch != nobody [
     ask random-patch [ ignite ]
-    ;; Removido: user-message para evitar interrupções
   ]
-  ;; Removido: else com user-message
 end
 
 to start-fires [number]
   let available-trees count patches with [pcolor = green]
   let fires-to-start min list number available-trees
 
-  if fires-to-start = 0 [
-    ;; Removido: user-message para evitar interrupções
-    stop
-  ]
+  if fires-to-start = 0 [ stop ]
 
   repeat fires-to-start [
     let random-patch one-of patches with [pcolor = green]
@@ -178,60 +246,37 @@ to start-fires [number]
       ask random-patch [ ignite ]
     ]
   ]
-
-  ;; Removido: user-message para evitar interrupções
 end
 
-;; **Novas Funções**
-
 to reforest
-  ;; Define o número de patches a serem reflorestados por chamada
   set trees-to-reforest 5
 
-  ;; Seleciona todos os patches queimados (cinza ou preto)
   let patches-burned patches with [pcolor = black or pcolor = gray]
-
-  ;; Determina quantos patches serão reflorestados (até 5 ou menos se não houver suficientes)
   let selected-patches n-of min list trees-to-reforest count patches-burned patches-burned
 
-  ;; Replanta as árvores nos patches selecionados
   ask selected-patches [
     set pcolor green
   ]
 
-  ;; Atualiza a contagem de árvores queimadas
   set burned-trees burned-trees - count selected-patches
 
-  ;; Garante que a contagem de árvores queimadas não fique negativa
   if burned-trees < 0 [
     set burned-trees 0
   ]
 end
 
-
-
 to stop-fire
-  ;; Transforma todos os incêndios ativos em brasas imediatamente
   ask fires [
     set breed embers
-    set color gray  ;; Opcional: Representa brasas com cor cinza
+    set color gray
   ]
 end
 
 to recover-air
-  ;; Recupera o nível de CO para o valor inicial, diminuindo gradualmente
   set co-level max list (co-level - 0.05) initial-co-level
-
-  ;; Recupera o nível de CO2 para o valor inicial, diminuindo gradualmente
   set co2-level max list (co2-level - 1) initial-co2-level
-
-  ;; Recupera o nível de PM2.5 para o valor inicial, diminuindo gradualmente
   set pm2_5-level max list (pm2_5-level - 0.5) initial-pm2_5-level
-
-  ;; Recupera o nível de PM10 para o valor inicial, diminuindo gradualmente
   set pm10-level max list (pm10-level - 0.5) initial-pm10-level
-
-  ;; Recupera o nível de O2 para o valor inicial, aumentando gradualmente
   set o2-level min list (o2-level + 0.2) initial-o2-level
 end
 @#$#@#$#@
@@ -331,7 +376,7 @@ wind-direction
 wind-direction
 0
 359
-359.0
+94.0
 1
 1
 NIL
@@ -411,7 +456,7 @@ wind-speed
 wind-speed
 0
 100
-52.0
+36.0
 1
 1
 m/s
@@ -495,6 +540,50 @@ NIL
 NIL
 NIL
 1
+
+MONITOR
+930
+24
+1069
+69
+Animais fugidos Norte
+escaped-north / 200
+17
+1
+11
+
+MONITOR
+932
+79
+1056
+124
+Animais fugidos Sul
+escaped-south / 200
+17
+1
+11
+
+MONITOR
+1075
+26
+1207
+71
+Animais fugidos Este
+escaped-east / 200
+17
+1
+11
+
+MONITOR
+1072
+87
+1213
+132
+Animais fugidos Oeste
+escaped-west / 200
+17
+1
+11
 
 @#$#@#$#@
 ## WHAT IS IT?
