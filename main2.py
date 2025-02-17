@@ -154,13 +154,56 @@ class EnvironmentModel(mesa.Model):
         else:
             self.apagarfogoem5ticks = 0
 
+# ... (importações e definições das classes: GenericAgent, AnimalsAgent, EnvironmentModel)
+
+# Criação do modelo
 model = EnvironmentModel(5, 10, 10)
+
+# Configuração inicial do NetLogo
 netlogo.command('setup')
-for i in range(200):
-    print("iteracao:", i, "\n")
-    if random.random() < 0.3:
-        model.StartFire()
-    model.step()
 
+# --- Início do código da interface ---
+import ipywidgets as widgets
+from IPython.display import display, clear_output
 
-netlogo.kill_workspace()
+# Cria um slider para definir o número de iterações da simulação
+iterations_slider = widgets.IntSlider(
+    value=200, 
+    min=10, 
+    max=500, 
+    step=10,
+    description='Iterações:',
+    continuous_update=False
+)
+
+# Botão para iniciar a simulação
+run_button = widgets.Button(
+    description='Iniciar Simulação', 
+    button_style='success',
+    tooltip='Clique para iniciar a simulação'
+)
+
+# Área de saída para exibir os logs da simulação
+output_area = widgets.Output()
+
+def run_simulation(b):
+    with output_area:
+        clear_output()  # Limpa a saída anterior
+        print("Preparando simulação...")
+        # Reinicia o NetLogo, se necessário
+        netlogo.command('setup')
+        for i in range(iterations_slider.value):
+            print("Iteração:", i)
+            # Com probabilidade de 30% inicia um incêndio
+            if random.random() < 0.3:
+                model.StartFire()
+            model.step()
+        print("Simulação finalizada!")
+        netlogo.kill_workspace()
+
+# Associa a função ao clique do botão
+run_button.on_click(run_simulation)
+
+# Exibe os widgets na tela
+display(widgets.VBox([iterations_slider, run_button, output_area]))
+# --- Fim do código da interface ---
