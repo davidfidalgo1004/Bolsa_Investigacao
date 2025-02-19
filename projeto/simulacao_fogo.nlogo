@@ -14,7 +14,10 @@ globals [
   escaped-east        ;; Contador de animais que saíram pelo lado direito (leste)
   escaped-west        ;; Contador de animais que saíram pelo lado esquerdo (oeste)
   fire-end-tick       ;; Tick em que o incêndio terminou
+  normal-temperature      ;; Temperatura ambiente padrão sem incêndios
+  max-temperature         ;; Temperatura máxima alcançável com incêndios
 
+  temperatura-in
   ;; Variáveis para armazenar os índices iniciais de ar
   initial-co-level
   initial-co2-level
@@ -41,6 +44,11 @@ to setup
   ask patches with [(random-float 100) < density and pcolor != blue] [
     set pcolor green
   ]
+
+  set normal-temperature 16
+  set max-temperature 50
+  set temperatura-in ambient-temperature
+
 
   set co-level 0.1
   set co2-level 400
@@ -76,7 +84,7 @@ to go
   ask fires [ spread-fire ]
   fade-embers
   update-air-composition
-
+  update-ambient-temperature
   ask animals [ react-to-fire ]
 
 
@@ -151,6 +159,19 @@ to react-to-fire
   ]
 end
 
+to update-ambient-temperature
+  let fire-count count fires
+
+  if fire-count > 0 [
+    ;; Se houver incêndio, a temperatura sobe gradualmente até um máximo definido
+    set ambient-temperature min list (ambient-temperature + 2) max-temperature
+  ] if fire-count = 0 [
+    ;; Se não houver incêndio, a temperatura volta ao normal lentamente
+    set ambient-temperature ambient-temperature - 0.2
+    if ambient-temperature < temperatura-in [ set ambient-temperature temperatura-in ]
+  ]
+
+end
 
 
 to spread-fire
@@ -577,6 +598,32 @@ MONITOR
 132
 Animais fugidos Oeste
 escaped-west / 200
+17
+1
+11
+
+SLIDER
+32
+433
+204
+466
+ambient-temperature
+ambient-temperature
+0
+30
+17.0
+1
+1
+NIL
+HORIZONTAL
+
+MONITOR
+62
+356
+181
+401
+Temperatura atual
+ambient-temperature
 17
 1
 11
