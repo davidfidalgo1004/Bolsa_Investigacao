@@ -1,57 +1,284 @@
 globals [
-  initial-trees   ;; how many trees (green patches) we started with
-  burned-trees    ;; how many have burned so far
+  initial-trees       ;; Número inicial de árvores (patches verdes)
+  burned-trees        ;; Número de árvores queimadas até agora
+  co-level            ;; Nível de Monóxido de Carbono (CO) em ppm
+  co2-level           ;; Nível de Dióxido de Carbono (CO2) em ppm
+  pm2_5-level         ;; Nível de partículas finas (PM2.5) em µg/m³
+  pm10-level          ;; Nível de partículas maiores (PM10) em µg/m³
+  o2-level            ;; Concentração de Oxigênio (O2) em ppm
+
+  trees-to-reforest   ;; Número de árvores a reflorestar (para reforest)
+  escaped-animals     ;; Contador total de animais que saíram da tela
+  escaped-north       ;; Contador de animais que saíram pelo topo (norte)
+  escaped-south       ;; Contador de animais que saíram pela base (sul)
+  escaped-east        ;; Contador de animais que saíram pelo lado direito (leste)
+  escaped-west        ;; Contador de animais que saíram pelo lado esquerdo (oeste)
+  fire-end-tick       ;; Tick em que o incêndio terminou
+
+  ;; Variáveis para armazenar os índices iniciais de ar
+  initial-co-level
+  initial-co2-level
+  initial-pm2_5-level
+  initial-pm10-level
+  initial-o2-level
+
+  burned-area
 ]
 
-breed [fires fire]    ;; bright red turtles -- the leading edge of the fire
-breed [embers ember]  ;; turtles gradually fading from red to near black
+breed [fires fire]    ;; Tartarugas que representam o fogo
+fires-own [burn-time] ;; Tempo que o fogo queimará antes de virar brasa
 
+breed [embers ember]  ;; Tartarugas que representam as brasas
+breed [animals animal] ;; Tartarugas que representam animais
+
+;; Configuração inicial
 to setup
   clear-all
   set-default-shape turtles "square"
-  ;; make some green trees
-  ask patches with [(random-float 100) < density]
-    [ set pcolor green ]
-  ;; make a column of burning trees
-  ask patches with [pxcor = min-pxcor]
-    [ ignite ]
-  ;; set tree counts
+
+  if not (is-number? density) [ set density 50 ]
+  if not (is-number? wind-speed) [ set wind-speed 1 ]
+  if not (is-number? wind-direction) [ set wind-direction 0 ]
+
+  ask patches with [(random-float 100) < density and pcolor != blue] [
+    set pcolor green
+  ]
+
+  set co-level 0.1
+  set co2-level 400
+  set pm2_5-level 10
+  set pm10-level 20
+  set o2-level 21000
+
+  set initial-co-level co-level
+  set initial-co2-level co2-level
+  set initial-pm2_5-level pm2_5-level
+  set initial-pm10-level pm10-level
+  set initial-o2-level o2-level
+
   set initial-trees count patches with [pcolor = green]
   set burned-trees 0
+  set escaped-animals 0
+  set escaped-north 0
+  set escaped-south 0
+  set escaped-east 0
+  set escaped-west 0
+  set fire-end-tick -1 ;; Inicializa a variável que controla quando o incêndio terminou
+
+
+
+  create-animals 800 [
+    set color brown
+    setxy random-xcor random-ycor
+    set size 3
+  ]
+
   reset-ticks
 end
 
 to go
-  if not any? turtles  ;; either fires or embers
-    [ stop ]
-  ask fires
-    [ ask neighbors4 with [pcolor = green]
-        [ ignite ]
-      set breed embers ]
+  ask fires [ spread-fire ]
   fade-embers
+  update-air-composition
+
+  ask animals [ react-to-fire ]
+
+
+  if not any? fires [
+    set fire-end-tick fire-end-tick + 1 ;; Marca o tick em que o incêndio terminou
+    recover-air
+  ]
+
+  if fire-end-tick = 100 [
+    set escaped-animals 0 ;; Reseta o contador 100 ticks após o incêndio terminar
+    set escaped-north 0
+    set escaped-south 0
+    set escaped-east 0
+    set escaped-west 0
+    set fire-end-tick 0  ;; Reseta a variável para esperar o próximo incêndio
+  ]
+
   tick
 end
 
-;; creates the fire turtles
-to ignite  ;; patch procedure
-  sprout-fires 1
-    [ set color red ]
+to react-to-fire
+  ;; Define os limites de percepção do fogo
+  let min-distance 1
+  let max-distance 100
+
+  ;; Encontra o fogo mais próximo
+  let nearest-fire min-one-of fires [distance myself]
+
+  ;; Verifica se existe um fogo próximo
+  if nearest-fire != nobody [
+    ;; Calcula a distância até ao fogo mais próximo
+    let dist-to-fire distance nearest-fire
+
+    ;; Verifica se a distância está dentro do intervalo definido
+    if dist-to-fire >= min-distance and dist-to-fire <= max-distance [
+      ;; Calcula a direção oposta ao fogo
+      let escape-direction (towards nearest-fire) + 180
+      set heading escape-direction
+      ;; Move-se para longe do fogo
+      fd 1
+
+      ;; Verifica se o animal saiu da tela e atualiza os contadores correspondentes
+      if xcor > max-pxcor [
+        set escaped-east escaped-east + 1
+        set escaped-animals escaped-animals + 1
+        die
+      ]
+      if xcor < min-pxcor [
+        set escaped-west escaped-west + 1
+        set escaped-animals escaped-animals + 1
+        die
+      ]
+      if ycor > max-pycor [
+        set escaped-north escaped-north + 1
+        set escaped-animals escaped-animals + 1
+        die
+      ]
+      if ycor < min-pycor [
+        set escaped-south escaped-south + 1
+        set escaped-animals escaped-animals + 1
+        die
+      ]
+    ] if dist-to-fire < min-distance or dist-to-fire > max-distance [
+      ;; Comportamento quando não há fogo nas proximidades ou está fora do intervalo
+      rt random 60
+      fd 1
+    ]
+  ] if nearest-fire = nobody [
+    ;; Comportamento quando não há fogo
+    rt random 60
+    fd 1
+  ]
+end
+
+
+
+to spread-fire
+  if burn-time > 0 [
+    set burn-time burn-time - 1
+    stop
+  ]
+
+  let green-neighbors neighbors4 with [pcolor = green]
+
+  let favored-neighbors green-neighbors with [wind-favor?]
+  let other-neighbors green-neighbors with [not wind-favor?]
+
+  if any? favored-neighbors [
+    ask favored-neighbors [
+      if random-float 1 < calc-wind-probability wind-speed [
+        ignite
+      ]
+    ]
+  ]
+
+  if any? other-neighbors [
+    ask other-neighbors [
+      if random-float 1 < 0.3 [ ignite ]
+    ]
+  ]
+
+  ask self [
+    set breed embers
+    set color gray
+  ]
+end
+
+to-report wind-favor?
+  let angle-to-neighbor towards myself
+  let angle-diff abs (wind-direction - angle-to-neighbor)
+  report (angle-diff <= 60) or (angle-diff >= 300)
+end
+
+to-report calc-wind-probability [speed]
+  report min list (0.3 + (speed * 0.05)) 0.8
+end
+
+to ignite
+  sprout-fires 1 [
+    set color red
+    set burn-time 2 + random 4
+  ]
   set pcolor black
   set burned-trees burned-trees + 1
 end
 
-;; achieve fading color effect for the fire as it burns
 to fade-embers
-  ask embers
-    [ set color color - 0.3  ;; make red darker
-      if color < red - 3.5     ;; are we almost at black?
-        [ set pcolor color
-          die ] ]
+  ask embers [
+    set color color - 0.2
+    if color < gray - 1.5 [
+      set pcolor color
+      die
+    ]
+  ]
 end
 
+to update-air-composition
+  let new-burned count fires
 
-; Copyright 1997 Uri Wilensky.
-; See Info tab for full copyright and license.
+  set co-level co-level + (new-burned * 0.1)
+  set co2-level co2-level + (new-burned * 10)
+  set pm2_5-level pm2_5-level + (new-burned * 5)
+  set pm10-level pm10-level + (new-burned * 5)
+  set o2-level max list (o2-level - (new-burned * 0.2)) 15000
+end
+
+to start-fire
+  let random-patch one-of patches with [pcolor = green]
+  if random-patch != nobody [
+    ask random-patch [ ignite ]
+  ]
+end
+
+to start-fires [number]
+  let available-trees count patches with [pcolor = green]
+  let fires-to-start min list number available-trees
+
+  if fires-to-start = 0 [ stop ]
+
+  repeat fires-to-start [
+    let random-patch one-of patches with [pcolor = green]
+    if random-patch != nobody [
+      ask random-patch [ ignite ]
+    ]
+  ]
+end
+
+to reforest
+  set trees-to-reforest 5
+
+  let patches-burned patches with [pcolor = black or pcolor = gray]
+  let selected-patches n-of min list trees-to-reforest count patches-burned patches-burned
+
+  ask selected-patches [
+    set pcolor green
+  ]
+
+  set burned-trees burned-trees - count selected-patches
+
+  if burned-trees < 0 [
+    set burned-trees 0
+  ]
+end
+
+to stop-fire
+  ask fires [
+    set breed embers
+    set color gray
+  ]
+end
+
+to recover-air
+  set co-level max list (co-level - 0.05) initial-co-level
+  set co2-level max list (co2-level - 1) initial-co2-level
+  set pm2_5-level max list (pm2_5-level - 0.5) initial-pm2_5-level
+  set pm10-level max list (pm10-level - 0.5) initial-pm10-level
+  set o2-level min list (o2-level + 0.2) initial-o2-level
+end
 @#$#@#$#@
 GRAPHICS-WINDOW
 200
@@ -100,7 +327,7 @@ density
 density
 0.0
 99.0
-57.0
+93.0
 1.0
 1
 %
@@ -139,6 +366,224 @@ NIL
 NIL
 NIL
 1
+
+SLIDER
+16
+186
+188
+219
+wind-direction
+wind-direction
+0
+359
+94.0
+1
+1
+NIL
+HORIZONTAL
+
+TEXTBOX
+31
+289
+181
+345
+0º-> SUL\n90º-> OESTE\n180º-> NORTE\n270º-> ESTE\n
+11
+0.0
+1
+
+MONITOR
+728
+24
+927
+69
+Dióxido de Carbono
+co2-level
+17
+1
+11
+
+MONITOR
+728
+78
+925
+123
+Monóxido de Carbono
+co-level
+17
+1
+11
+
+MONITOR
+730
+133
+925
+178
+Oxigénio
+o2-level
+17
+1
+11
+
+MONITOR
+730
+193
+925
+238
+Particula Fina 2.5
+pm2_5-level
+17
+1
+11
+
+MONITOR
+728
+250
+927
+295
+Particula Fina 10
+pm10-level
+17
+1
+11
+
+SLIDER
+14
+238
+186
+271
+wind-speed
+wind-speed
+0
+100
+36.0
+1
+1
+m/s
+HORIZONTAL
+
+BUTTON
+1054
+148
+1173
+181
+Iniciar Incendio
+start-fire
+NIL
+1
+T
+OBSERVER
+NIL
+NIL
+NIL
+NIL
+1
+
+BUTTON
+989
+275
+1153
+308
+Iniciar Vários Incendios
+start-fires number-of-fires
+NIL
+1
+T
+OBSERVER
+NIL
+NIL
+NIL
+NIL
+1
+
+INPUTBOX
+982
+210
+1137
+270
+number-of-fires
+3.0
+1
+0
+Number
+
+BUTTON
+853
+320
+963
+353
+Reflorestação
+reforest
+T
+1
+T
+OBSERVER
+NIL
+NIL
+NIL
+NIL
+1
+
+BUTTON
+843
+370
+956
+403
+Parar Incendio
+stop-fire
+NIL
+1
+T
+OBSERVER
+NIL
+NIL
+NIL
+NIL
+1
+
+MONITOR
+930
+24
+1069
+69
+Animais fugidos Norte
+escaped-north / 200
+17
+1
+11
+
+MONITOR
+932
+79
+1056
+124
+Animais fugidos Sul
+escaped-south / 200
+17
+1
+11
+
+MONITOR
+1075
+26
+1207
+71
+Animais fugidos Este
+escaped-east / 200
+17
+1
+11
+
+MONITOR
+1072
+87
+1213
+132
+Animais fugidos Oeste
+escaped-west / 200
+17
+1
+11
 
 @#$#@#$#@
 ## WHAT IS IT?
