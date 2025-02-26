@@ -1,3 +1,4 @@
+; Declaração de variáveis globais
 globals [
   initial-trees       ;; Número inicial de árvores (patches verdes)
   burned-trees        ;; Número de árvores queimadas até agora
@@ -14,8 +15,8 @@ globals [
   escaped-east        ;; Contador de animais que saíram pelo lado direito (leste)
   escaped-west        ;; Contador de animais que saíram pelo lado esquerdo (oeste)
   fire-end-tick       ;; Tick em que o incêndio terminou
-  normal-temperature      ;; Temperatura ambiente padrão sem incêndios
-  max-temperature         ;; Temperatura máxima alcançável com incêndios
+  normal-temperature  ;; Temperatura ambiente padrão sem incêndios
+  max-temperature     ;; Temperatura máxima alcançável com incêndios
 
   temperatura-in
   ;; Variáveis para armazenar os índices iniciais de ar
@@ -24,6 +25,11 @@ globals [
   initial-pm2_5-level
   initial-pm10-level
   initial-o2-level
+]
+
+; Acrescentamos a variável de patch para armazenar a altura da árvore
+patches-own [
+  tree-height  ;; Altura da árvore (valor arbitrário, por exemplo, entre 5 e 15)
 ]
 
 breed [fires fire]    ;; Tartarugas que representam o fogo
@@ -37,18 +43,19 @@ to setup
   clear-all
   set-default-shape turtles "square"
 
-  if not (is-number? density) [ set density 50 ]
-  if not (is-number? wind-speed) [ set wind-speed 1 ]
+  if not (is-number? density) [ set density 20 ]  ;; Densidade baixa
+  if not (is-number? wind-speed) [ set wind-speed 2 ]  ;; Vento mais forte
   if not (is-number? wind-direction) [ set wind-direction 0 ]
 
+  ; Ao colorir os patches como árvores, atribuímos uma altura aleatória
   ask patches with [(random-float 100) < density and pcolor != blue] [
     set pcolor green
+    set tree-height (5 + random-float 10)  ;; Altura entre 5 e 15
   ]
 
   set normal-temperature 16
   set max-temperature 50
   set temperatura-in ambient-temperature
-
 
   set co-level 0.1
   set co2-level 400
@@ -87,14 +94,13 @@ to go
   update-ambient-temperature
   ask animals [ react-to-fire ]
 
-
   if not any? fires [
     set fire-end-tick fire-end-tick + 1 ;; Marca o tick em que o incêndio terminou
     recover-air
   ]
 
   if fire-end-tick = 100 [
-    set escaped-animals 0 ;; Reseta o contador 100 ticks após o incêndio terminar
+    set escaped-animals 0 ;; Reseta o contador 100 ticks após o término do incêndio
     set escaped-north 0
     set escaped-south 0
     set escaped-east 0
@@ -111,19 +117,13 @@ to react-to-fire
   let max-distance 100
 
   ;; Encontra o fogo mais próximo
-  let nearest-fire min-one-of fires [distance myself]
-
-  ;; Verifica se existe um fogo próximo
+  let nearest-fire min-one-of fires [ distance myself ]
   if nearest-fire != nobody [
-    ;; Calcula a distância até ao fogo mais próximo
     let dist-to-fire distance nearest-fire
-
-    ;; Verifica se a distância está dentro do intervalo definido
     if dist-to-fire >= min-distance and dist-to-fire <= max-distance [
-      ;; Calcula a direção oposta ao fogo
+      ;; Calcula a direção oposta ao fogo e foge
       let escape-direction (towards nearest-fire) + 180
       set heading escape-direction
-      ;; Move-se para longe do fogo
       fd 1
 
       ;; Verifica se o animal saiu da tela e atualiza os contadores correspondentes
@@ -147,13 +147,13 @@ to react-to-fire
         set escaped-animals escaped-animals + 1
         die
       ]
-    ] if dist-to-fire < min-distance or dist-to-fire > max-distance [
-      ;; Comportamento quando não há fogo nas proximidades ou está fora do intervalo
+    ]
+    if dist-to-fire < min-distance or dist-to-fire > max-distance [
       rt random 60
       fd 1
     ]
-  ] if nearest-fire = nobody [
-    ;; Comportamento quando não há fogo
+  ]
+  if nearest-fire = nobody [
     rt random 60
     fd 1
   ]
@@ -161,60 +161,75 @@ end
 
 to update-ambient-temperature
   let fire-count count fires
-
   if fire-count > 0 [
-    ;; Se houver incêndio, a temperatura sobe gradualmente até um máximo definido
     set ambient-temperature min list (ambient-temperature + 2) max-temperature
-  ] if fire-count = 0 [
-    ;; Se não houver incêndio, a temperatura volta ao normal lentamente
+  ]
+  if fire-count = 0 [
     set ambient-temperature ambient-temperature - 0.2
     if ambient-temperature < temperatura-in [ set ambient-temperature temperatura-in ]
   ]
-
 end
 
-
+; Procedimento que propaga o fogo considerando vento, diferença de altura e maior alcance para densidade baixa
 to spread-fire
   if burn-time > 0 [
     set burn-time burn-time - 1
     stop
   ]
 
-  let green-neighbors neighbors4 with [pcolor = green]
+  let source-height [tree-height] of patch-here
+  ; Considera todos os patches em um raio de 2 (maior alcance)
+  let green-neighbors patches in-radius 2 with [ pcolor = green ]
 
-  let favored-neighbors green-neighbors with [wind-favor?]
-  let other-neighbors green-neighbors with [not wind-favor?]
-
+  ;; Propaga para vizinhos "favorecidos" pelo vento
+  let favored-neighbors green-neighbors with [ wind-favor? ]
   if any? favored-neighbors [
     ask favored-neighbors [
-      if random-float 1 < calc-wind-probability wind-speed [
+      let diff source-height - tree-height
+      let multiplier max list 0.1 (1 + diff / 10)
+      let prob calc-wind-probability wind-speed * multiplier * 2.0
+      if random-float 1 < prob [
         ignite
       ]
     ]
   ]
 
+  ;; Propaga para os outros vizinhos
+  let other-neighbors green-neighbors with [ not wind-favor? ]
   if any? other-neighbors [
     ask other-neighbors [
-      if random-float 1 < 0.3 [ ignite ]
+      let diff source-height - tree-height
+      let multiplier max list 0.1 (1 + diff / 10)
+      let prob 0.3 * multiplier * 2.0
+      if random-float 1 < prob [
+        ignite
+      ]
     ]
   ]
 
+  ;; Dispersa fragmentos (embers) que podem iniciar novos focos de incêndio
+  disperse-embers
+
+  ;; Após espalhar, a árvore em combustão se transforma em brasas
   ask self [
     set breed embers
     set color gray
   ]
 end
 
+; Verifica se o vizinho está favorecido pelo vento (ângulo entre o vento e a direção do vizinho)
 to-report wind-favor?
   let angle-to-neighbor towards myself
   let angle-diff abs (wind-direction - angle-to-neighbor)
   report (angle-diff <= 60) or (angle-diff >= 300)
 end
 
+; Calcula a probabilidade de propagação favorecida pelo vento
 to-report calc-wind-probability [speed]
   report min list (0.3 + (speed * 0.05)) 0.8
 end
 
+; Procedimento para iniciar o fogo em uma árvore (patch verde)
 to ignite
   sprout-fires 1 [
     set color red
@@ -222,6 +237,26 @@ to ignite
   ]
   set pcolor black
   set burned-trees burned-trees + 1
+end
+
+; Procedimento que dispersa fragmentos (embers) de forma aleatória, com maior quantidade e alcance
+to disperse-embers
+  let num-embers 2 + random 3  ;; Entre 2 e 4 fragmentos
+  let source-height [tree-height] of patch-here
+  repeat num-embers [
+    ;; Distância de deslocamento aumenta com a velocidade do vento e a altura da árvore; fator aumentado
+    let distance2 wind-speed * (source-height / 10) * random-float 6
+    ;; Ângulo centrado na direção do vento com variação aleatória de ±30°
+    let angle wind-direction + (random 60 - 30)
+    let angx distance2 * cos angle
+    let angy distance2 * sin angle
+    let target-patch patch-at angx angy
+    if (target-patch != nobody) and ([pcolor] of target-patch = green) [
+      if random-float 1 < 0.4 [  ;; Chance de ignição via fragmento elevada para 0.4
+        ask target-patch [ ignite ]
+      ]
+    ]
+  ]
 end
 
 to fade-embers
@@ -236,7 +271,6 @@ end
 
 to update-air-composition
   let new-burned count fires
-
   set co-level co-level + (new-burned * 0.1)
   set co2-level co2-level + (new-burned * 10)
   set pm2_5-level pm2_5-level + (new-burned * 5)
@@ -254,9 +288,7 @@ end
 to start-fires [number]
   let available-trees count patches with [pcolor = green]
   let fires-to-start min list number available-trees
-
   if fires-to-start = 0 [ stop ]
-
   repeat fires-to-start [
     let random-patch one-of patches with [pcolor = green]
     if random-patch != nobody [
@@ -267,16 +299,14 @@ end
 
 to reforest
   set trees-to-reforest 5
-
   let patches-burned patches with [pcolor = black or pcolor = gray]
   let selected-patches n-of min list trees-to-reforest count patches-burned patches-burned
-
   ask selected-patches [
     set pcolor green
+    ;; Ao reflorestar, redefinimos a altura da árvore
+    set tree-height (5 + random-float 10)
   ]
-
   set burned-trees burned-trees - count selected-patches
-
   if burned-trees < 0 [
     set burned-trees 0
   ]
@@ -344,7 +374,7 @@ density
 density
 0.0
 99.0
-93.0
+29.0
 1.0
 1
 %
@@ -473,7 +503,7 @@ wind-speed
 wind-speed
 0
 100
-36.0
+13.0
 1
 1
 m/s
@@ -611,7 +641,7 @@ ambient-temperature
 ambient-temperature
 0
 30
-17.0
+25.80000000000001
 1
 1
 NIL

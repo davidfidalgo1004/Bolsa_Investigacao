@@ -21,17 +21,15 @@ class SimulationApp(tk.Tk):
             netlogo_home=r"C:\Program Files\NetLogo 6.4.0"
         )
         self.netlogo.load_model(r"C:\Users\david\Desktop\Bolsa_Investigacao\projeto\simulacao_fogo.nlogo")
-
-        # 2) Instância do modelo
         self.model = EnvironmentModel(5, 10, 10, netlogo=self.netlogo)
         self.netlogo.command("setup")
 
-        # 3) Dados para gráfico
+        # Dados para gráfico
         self.burned_area_evol = []
         self.forested_area_evol = []
         self.timesteps = []
 
-        # 4) Layout da interface
+        # Layout da interface
         controls_frame = ttk.Frame(self)
         controls_frame.pack(padx=10, pady=10, fill=tk.X)
 
@@ -117,22 +115,29 @@ class SimulationApp(tk.Tk):
             # Step do modelo
             self.model.step()
 
-            # Se fires_detected aumentou neste tick => houve detecção
+            # Verifica se pelo menos 2 sensores (ar, animais, temperatura) foram ativados
+            if self.model.check_fire_sensors():
+                # Log de alerta
+                self.add_log("[ALERTA] 🚨 Múltiplos sensores ativados! POSSÍVEL INCÊNDIO DETECTADO!")
+                self.fire_status_var.set(
+                    f"🔥 ALERTA DE INCÊNDIO! (Temp: {self.model.temperature:.1f} °C)"
+                )
+            else:
+                # Caso contrário, mostra se ainda há fogo ou não
+                if self.model.is_fire_active():
+                    self.fire_status_var.set(
+                        f"Incêndio: ATIVO (Temp: {self.model.temperature:.1f} °C)"
+                    )
+                else:
+                    self.fire_status_var.set(
+                        f"Incêndio: Inativo (Temp: {self.model.temperature:.1f} °C)"
+                    )
+
+            # Se fires_detected aumentou neste tick => houve detecção (contagem de incêndios)
             if self.model.fires_detected > self.last_detected_count:
                 self.last_detected_count = self.model.fires_detected
                 current_temp = self.model.temperature
                 self.add_log(f"[TICK {i}] Incêndio DETECTADO! Temperatura = {current_temp:.1f} °C (contador=10 ticks)")
-
-            # Atualiza label de incêndio + temperatura
-            # Se "is_fire_active()"
-            if self.model.is_fire_active():
-                self.fire_status_var.set(
-                    f"Incêndio: ATIVO (Temp: {self.model.temperature:.1f} °C)"
-                )
-            else:
-                self.fire_status_var.set(
-                    f"Incêndio: Inativo (Temp: {self.model.temperature:.1f} °C)"
-                )
 
             # Coleta dados do NetLogo
             burned_trees = self.netlogo.report("burned-trees")

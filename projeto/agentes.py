@@ -1,10 +1,8 @@
 import mesa
 
 class GenericAgent(mesa.Agent):
-    """Agente genérico, que pode ser 'Air' ou 'Wind', sem chamar super().__init__."""
+    """Agente genérico, que pode ser 'Air' ou 'Wind'."""
     def __init__(self, unique_id, model, agent_type, netlogo):
-        # Em versões mais novas do Mesa, não chamamos super().__init__ com esses argumentos,
-        # pois a assinatura mudou. Então, atribuimos manualmente:
         self.netlogo = netlogo
         self.unique_id = unique_id
         self.model = model
@@ -23,7 +21,6 @@ class GenericAgent(mesa.Agent):
             self.pm2_5_level = self.netlogo.report('pm2_5-level')
             self.pm10_level = self.netlogo.report('pm10-level')
             self.o2_level = self.netlogo.report('o2-level')
-
 
     def atualizacao_air(self):
         """Atualiza as variáveis de ar no NetLogo e retorna 'Perigo' ou 'Seguro'."""
@@ -62,19 +59,21 @@ class GenericAgent(mesa.Agent):
 class AnimalsAgent(mesa.Agent):
     """Agente que representa animais com sensores direcionais."""
     def __init__(self, unique_id, model, netlogo):
-        # Atribuição direta, sem chamar super().__init__.
-        self.netlogo=netlogo
+        self.netlogo = netlogo
         self.unique_id = unique_id
         self.model = model
         self.sensor = None
-        self.detection = 0
+        self.detection = 0  # 1 => detectou incêndio, 0 => não
 
     def set_sensor(self, direction):
         """Define a direção do sensor (N, S, O, E)."""
         self.sensor = direction
 
     def alerta(self):
-        """Verifica se há 'escaped' acima de 50 para a direção que o agente monitora."""
+        """
+        Verifica se há 'escaped' acima de 50 para a direção que o agente monitora.
+        Se sim, detection = 1 (incêndio), caso contrário 0.
+        """
         if self.netlogo.report('escaped-north') > 50 and self.sensor == "N":
             self.detection = 1
             return "Incêndio"
