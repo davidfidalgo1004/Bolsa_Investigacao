@@ -25,11 +25,14 @@ globals [
   initial-pm2_5-level
   initial-pm10-level
   initial-o2-level
+
+  rain-level          ;; Nível de precipitação (0 = sem chuva, valores maiores indicam chuva mais intensa)
 ]
 
-; Acrescentamos a variável de patch para armazenar a altura da árvore
+; Acrescentamos variáveis de patch: a altura da árvore e a altitude do local
 patches-own [
-  tree-height  ;; Altura da árvore (valor arbitrário, por exemplo, entre 5 e 15)
+  tree-height  ;; Altura da árvore (valor arbitrário, ex.: entre 5 e 15)
+  altitude     ;; Altitude do patch (ex.: entre 0 e 100)
 ]
 
 breed [fires fire]    ;; Tartarugas que representam o fogo
@@ -47,7 +50,12 @@ to setup
   if not (is-number? wind-speed) [ set wind-speed 2 ]  ;; Vento mais forte
   if not (is-number? wind-direction) [ set wind-direction 0 ]
 
-  ; Ao colorir os patches como árvores, atribuímos uma altura aleatória
+  ; Inicializa a altitude para cada patch (valor entre 0 e 100)
+  ask patches [
+    set altitude random-float 100
+  ]
+
+  ; Ao colorir os patches como árvores, atribuímos uma altura aleatória à árvore
   ask patches with [(random-float 100) < density and pcolor != blue] [
     set pcolor green
     set tree-height (5 + random-float 10)  ;; Altura entre 5 e 15
@@ -78,6 +86,9 @@ to setup
   set escaped-west 0
   set fire-end-tick -1 ;; Inicializa a variável que controla quando o incêndio terminou
 
+  ; Inicia sem chuva
+  set rain-level 0
+
   create-animals 800 [
     set color brown
     setxy random-xcor random-ycor
@@ -88,6 +99,7 @@ to setup
 end
 
 to go
+  update-precipitation
   ask fires [ spread-fire ]
   fade-embers
   update-air-composition
@@ -170,7 +182,7 @@ to update-ambient-temperature
   ]
 end
 
-; Procedimento que propaga o fogo considerando vento, diferença de altura e maior alcance para densidade baixa
+; Procedimento que propaga o fogo considerando vento, diferença de altura das árvores, altitude e precipitação
 to spread-fire
   if burn-time > 0 [
     set burn-time burn-time - 1
@@ -178,7 +190,8 @@ to spread-fire
   ]
 
   let source-height [tree-height] of patch-here
-  ; Considera todos os patches em um raio de 2 (maior alcance)
+  let source-altitude [altitude] of patch-here
+  ; Considera todos os patches em um raio de 2 (maior alcance para densidade baixa)
   let green-neighbors patches in-radius 2 with [ pcolor = green ]
 
   ;; Propaga para vizinhos "favorecidos" pelo vento
@@ -186,9 +199,16 @@ to spread-fire
   if any? favored-neighbors [
     ask favored-neighbors [
       let diff source-height - tree-height
-      let multiplier max list 0.1 (1 + diff / 10)
-      let prob calc-wind-probability wind-speed * multiplier * 2.0
-      if random-float 1 < prob [
+      let tree-multiplier max list 0.1 (1 + diff / 10)
+      let base-prob calc-wind-probability wind-speed * tree-multiplier * 2.0
+
+      ; Incorpora o fator altitude
+      let alt-diff source-altitude - altitude
+      let alt-multiplier max list 0.1 (1 + alt-diff / 100)
+
+      ; Incorpora a redução causada pela precipitação
+      let effective-prob base-prob * alt-multiplier * (1 - rain-level)
+      if random-float 1 < effective-prob [
         ignite
       ]
     ]
@@ -199,9 +219,13 @@ to spread-fire
   if any? other-neighbors [
     ask other-neighbors [
       let diff source-height - tree-height
-      let multiplier max list 0.1 (1 + diff / 10)
-      let prob 0.3 * multiplier * 2.0
-      if random-float 1 < prob [
+      let tree-multiplier max list 0.1 (1 + diff / 10)
+      let base-prob 0.3 * tree-multiplier * 2.0
+
+      let alt-diff source-altitude - altitude
+      let alt-multiplier max list 0.1 (1 + alt-diff / 100)
+      let effective-prob base-prob * alt-multiplier * (1 - rain-level)
+      if random-float 1 < effective-prob [
         ignite
       ]
     ]
@@ -239,7 +263,7 @@ to ignite
   set burned-trees burned-trees + 1
 end
 
-; Procedimento que dispersa fragmentos (embers) de forma aleatória, com maior quantidade e alcance
+; Procedimento que dispersa fragmentos (embers) de forma aleatória, com maior quantidade, alcance e influenciados pela chuva
 to disperse-embers
   let num-embers 2 + random 3  ;; Entre 2 e 4 fragmentos
   let source-height [tree-height] of patch-here
@@ -252,7 +276,7 @@ to disperse-embers
     let angy distance2 * sin angle
     let target-patch patch-at angx angy
     if (target-patch != nobody) and ([pcolor] of target-patch = green) [
-      if random-float 1 < 0.4 [  ;; Chance de ignição via fragmento elevada para 0.4
+      if random-float 1 < (0.4 * (1 - rain-level)) [  ;; Chance de ignição via fragmento reduzida pela chuva
         ask target-patch [ ignite ]
       ]
     ]
@@ -326,6 +350,21 @@ to recover-air
   set pm10-level max list (pm10-level - 0.5) initial-pm10-level
   set o2-level min list (o2-level + 0.2) initial-o2-level
 end
+
+; Procedimento que atualiza a precipitação (rain)
+to update-precipitation
+  ; Se estiver chovendo, a intensidade decai gradualmente
+  if rain-level > 0 [
+    set rain-level rain-level - 0.005
+    if rain-level < 0 [ set rain-level 0 ]
+  ]
+  ; Com pequena chance, inicia um evento de chuva (intensidade entre 0.3 e 0.8)
+  if rain-level = 0 [
+    if random-float 1 < 0.01 [
+      set rain-level 0.3 + random-float 0.5
+    ]
+  ]
+end
 @#$#@#$#@
 GRAPHICS-WINDOW
 200
@@ -374,7 +413,7 @@ density
 density
 0.0
 99.0
-29.0
+47.0
 1.0
 1
 %
@@ -641,7 +680,7 @@ ambient-temperature
 ambient-temperature
 0
 30
-25.80000000000001
+50.0
 1
 1
 NIL

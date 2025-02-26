@@ -10,6 +10,9 @@ from ambiente import EnvironmentModel
 
 matplotlib.use('TkAgg')
 
+#formula
+#prob = alfa1*(t-t0) + alfa2*(h-h0) + alfa3*(d-d0) + alfa4*(v - cos(teta) + 1) +  alfa5*(precipitaçao) + alfa6*(humidade) + tipoarvores
+
 class SimulationApp(tk.Tk):
     def __init__(self):
         super().__init__()
