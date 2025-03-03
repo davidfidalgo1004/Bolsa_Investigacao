@@ -106,7 +106,7 @@ class EnvironmentModel(mesa.Model):
         if self.temperature > 50:
             active_sensors += 1
 
-        return (active_sensors >= 2)
+        return (active_sensors >= 1)
 
     def step(self):
         """
