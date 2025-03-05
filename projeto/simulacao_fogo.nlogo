@@ -90,7 +90,7 @@ to setup
   set rain-level 0
 
   create-animals 800 [
-    set color brown
+    set hidden? true
     setxy random-xcor random-ycor
     set size 3
   ]
@@ -367,13 +367,13 @@ to update-precipitation
 end
 @#$#@#$#@
 GRAPHICS-WINDOW
-200
-10
-710
-521
+233
+15
+703
+486
 -1
 -1
-2.0
+3.06
 1
 10
 1
@@ -383,10 +383,10 @@ GRAPHICS-WINDOW
 0
 0
 1
--125
-125
--125
-125
+-75
+75
+-75
+75
 1
 1
 1
