@@ -98,6 +98,7 @@ to setup
   reset-ticks
 end
 
+;; Ciclo principal
 to go
   update-precipitation
   ask fires [ spread-fire ]
@@ -123,22 +124,19 @@ to go
   tick
 end
 
+;; Comportamento dos animais em relação ao fogo
 to react-to-fire
-  ;; Define os limites de percepção do fogo
   let min-distance 1
   let max-distance 100
 
-  ;; Encontra o fogo mais próximo
   let nearest-fire min-one-of fires [ distance myself ]
   if nearest-fire != nobody [
     let dist-to-fire distance nearest-fire
     if dist-to-fire >= min-distance and dist-to-fire <= max-distance [
-      ;; Calcula a direção oposta ao fogo e foge
       let escape-direction (towards nearest-fire) + 180
       set heading escape-direction
       fd 1
 
-      ;; Verifica se o animal saiu da tela e atualiza os contadores correspondentes
       if xcor > max-pxcor [
         set escaped-east escaped-east + 1
         set escaped-animals escaped-animals + 1
@@ -171,6 +169,7 @@ to react-to-fire
   ]
 end
 
+;; Ajusta a temperatura ambiente
 to update-ambient-temperature
   let fire-count count fires
   if fire-count > 0 [
@@ -182,19 +181,21 @@ to update-ambient-temperature
   ]
 end
 
-; Procedimento que propaga o fogo considerando vento, diferença de altura das árvores, altitude e precipitação
+;; Propagação do fogo, considerando vento, altura da árvore, altitude e chuva
+;; Ajustado para que a árvore permaneça ardendo em vermelho por alguns ticks
+;; antes de virar brasa.
 to spread-fire
   if burn-time > 0 [
     set burn-time burn-time - 1
+    set color red  ;; Mantém a cor vermelha enquanto está queimando
     stop
   ]
 
   let source-height [tree-height] of patch-here
   let source-altitude [altitude] of patch-here
-  ; Considera todos os patches em um raio de 2 (maior alcance para densidade baixa)
   let green-neighbors patches in-radius 2 with [ pcolor = green ]
 
-  ;; Propaga para vizinhos "favorecidos" pelo vento
+  ;; Propaga para vizinhos favorecidos pelo vento
   let favored-neighbors green-neighbors with [ wind-favor? ]
   if any? favored-neighbors [
     ask favored-neighbors [
@@ -202,11 +203,9 @@ to spread-fire
       let tree-multiplier max list 0.1 (1 + diff / 10)
       let base-prob calc-wind-probability wind-speed * tree-multiplier * 2.0
 
-      ; Incorpora o fator altitude
       let alt-diff source-altitude - altitude
       let alt-multiplier max list 0.1 (1 + alt-diff / 100)
 
-      ; Incorpora a redução causada pela precipitação
       let effective-prob base-prob * alt-multiplier * (1 - rain-level)
       if random-float 1 < effective-prob [
         ignite
@@ -241,67 +240,20 @@ to spread-fire
   ]
 end
 
-; Verifica se o vizinho está favorecido pelo vento (ângulo entre o vento e a direção do vizinho)
+;; Verifica se o patch está favorecido pelo vento
+;; (ângulo entre o vento e a direção do patch)
 to-report wind-favor?
   let angle-to-neighbor towards myself
   let angle-diff abs (wind-direction - angle-to-neighbor)
   report (angle-diff <= 60) or (angle-diff >= 300)
 end
 
-; Calcula a probabilidade de propagação favorecida pelo vento
+;; Calcula a probabilidade de propagação favorecida pelo vento
 to-report calc-wind-probability [speed]
   report min list (0.3 + (speed * 0.05)) 0.8
 end
 
-; Procedimento para iniciar o fogo em uma árvore (patch verde)
-to ignite
-  sprout-fires 1 [
-    set color red
-    set burn-time 2 + random 4
-  ]
-  set pcolor black
-  set burned-trees burned-trees + 1
-end
-
-; Procedimento que dispersa fragmentos (embers) de forma aleatória, com maior quantidade, alcance e influenciados pela chuva
-to disperse-embers
-  let num-embers 2 + random 3  ;; Entre 2 e 4 fragmentos
-  let source-height [tree-height] of patch-here
-  repeat num-embers [
-    ;; Distância de deslocamento aumenta com a velocidade do vento e a altura da árvore; fator aumentado
-    let distance2 wind-speed * (source-height / 10) * random-float 6
-    ;; Ângulo centrado na direção do vento com variação aleatória de ±30°
-    let angle wind-direction + (random 60 - 30)
-    let angx distance2 * cos angle
-    let angy distance2 * sin angle
-    let target-patch patch-at angx angy
-    if (target-patch != nobody) and ([pcolor] of target-patch = green) [
-      if random-float 1 < (0.4 * (1 - rain-level)) [  ;; Chance de ignição via fragmento reduzida pela chuva
-        ask target-patch [ ignite ]
-      ]
-    ]
-  ]
-end
-
-to fade-embers
-  ask embers [
-    set color color - 0.2
-    if color < gray - 1.5 [
-      set pcolor color
-      die
-    ]
-  ]
-end
-
-to update-air-composition
-  let new-burned count fires
-  set co-level co-level + (new-burned * 0.1)
-  set co2-level co2-level + (new-burned * 10)
-  set pm2_5-level pm2_5-level + (new-burned * 5)
-  set pm10-level pm10-level + (new-burned * 5)
-  set o2-level max list (o2-level - (new-burned * 0.2)) 15000
-end
-
+;; Inicia o fogo em uma árvore verde aleatória
 to start-fire
   let random-patch one-of patches with [pcolor = green]
   if random-patch != nobody [
@@ -309,6 +261,9 @@ to start-fire
   ]
 end
 
+;; Inicia vários focos de incêndio de uma só vez
+;; caso haja árvores disponíveis
+;; e o número solicitado seja maior do que zero.
 to start-fires [number]
   let available-trees count patches with [pcolor = green]
   let fires-to-start min list number available-trees
@@ -321,13 +276,23 @@ to start-fires [number]
   ]
 end
 
+;; Procedimento para acionar a queima da árvore
+to ignite
+  sprout-fires 1 [
+    set color red
+    set burn-time 5 + random 4   ;; Define por quantos ticks a árvore queima
+  ]
+  set pcolor black
+  set burned-trees burned-trees + 1
+end
+
+;; Refloresta algumas árvores queimadas
 to reforest
   set trees-to-reforest 5
   let patches-burned patches with [pcolor = black or pcolor = gray]
   let selected-patches n-of min list trees-to-reforest count patches-burned patches-burned
   ask selected-patches [
     set pcolor green
-    ;; Ao reflorestar, redefinimos a altura da árvore
     set tree-height (5 + random-float 10)
   ]
   set burned-trees burned-trees - count selected-patches
@@ -336,6 +301,8 @@ to reforest
   ]
 end
 
+;; Força o fogo a parar e virar brasa
+;; (pode ser chamado manualmente em situações específicas)
 to stop-fire
   ask fires [
     set breed embers
@@ -343,6 +310,29 @@ to stop-fire
   ]
 end
 
+;; As brasas vão esfriando gradualmente até desaparecerem
+;; quando ficam muito "frias" (cor < cinza - 1.5)
+to fade-embers
+  ask embers [
+    set color color - 0.2
+    if color < gray - 1.5 [
+      set pcolor color
+      die
+    ]
+  ]
+end
+
+;; Atualiza a composição do ar em função da presença de fogo
+to update-air-composition
+  let new-burned count fires
+  set co-level co-level + (new-burned * 0.1)
+  set co2-level co2-level + (new-burned * 10)
+  set pm2_5-level pm2_5-level + (new-burned * 5)
+  set pm10-level pm10-level + (new-burned * 5)
+  set o2-level max list (o2-level - (new-burned * 0.2)) 15000
+end
+
+;; Recupera parcialmente a qualidade do ar
 to recover-air
   set co-level max list (co-level - 0.05) initial-co-level
   set co2-level max list (co2-level - 1) initial-co2-level
@@ -351,14 +341,31 @@ to recover-air
   set o2-level min list (o2-level + 0.2) initial-o2-level
 end
 
-; Procedimento que atualiza a precipitação (rain)
+;; Dispersa brasas (embers) que podem iniciar novos focos
+;; A distância e direção dependem do vento e altura da árvore.
+to disperse-embers
+  let num-embers 2 + random 3  ;; Entre 2 e 4 fragmentos
+  let source-height [tree-height] of patch-here
+  repeat num-embers [
+    let distance2 wind-speed * (source-height / 10) * random-float 6
+    let angle wind-direction + (random 60 - 30)
+    let angx distance2 * cos angle
+    let angy distance2 * sin angle
+    let target-patch patch-at angx angy
+    if (target-patch != nobody) and ([pcolor] of target-patch = green) [
+      if random-float 1 < (0.4 * (1 - rain-level)) [
+        ask target-patch [ ignite ]
+      ]
+    ]
+  ]
+end
+
+;; Procedimento que atualiza a precipitação (chuva)
 to update-precipitation
-  ; Se estiver chovendo, a intensidade decai gradualmente
   if rain-level > 0 [
     set rain-level rain-level - 0.005
     if rain-level < 0 [ set rain-level 0 ]
   ]
-  ; Com pequena chance, inicia um evento de chuva (intensidade entre 0.3 e 0.8)
   if rain-level = 0 [
     if random-float 1 < 0.01 [
       set rain-level 0.3 + random-float 0.5

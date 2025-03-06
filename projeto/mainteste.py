@@ -23,7 +23,7 @@ class MplCanvas(FigureCanvas):
 class SimulationApp(QMainWindow):
     def __init__(self):
         super().__init__()
-        self.setWindowTitle("Simulação de Fogo - Interface Reorganizada (PySide6)")
+        self.setWindowTitle("Simulador de Incêndio")
 
         # ------------------ INICIALIZAÇÃO DO NETLOGO ------------------
         self.netlogo = pynetlogo.NetLogoLink(
@@ -83,6 +83,7 @@ class SimulationApp(QMainWindow):
         # Cria os itens da grade (grid) como retângulos (QGraphicsRectItem)
         self.cell_size = 5  # Tamanho de cada célula; ajuste conforme necessário
         self.cells = []
+        self.netlogo.command("setup")
         for row in range(self.world_height):
             row_items = []
             for col in range(self.world_width):
@@ -134,7 +135,6 @@ class SimulationApp(QMainWindow):
         self.forested_area_evol.clear()
         self.timesteps.clear()
 
-        self.netlogo.command("setup")
         self.model.fires_created = 0
         self.model.fires_detected = 0
         self.model.detect_countdown = 0
