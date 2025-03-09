@@ -1,91 +1,47 @@
-import mesa
+import random
+from mesa import Agent
 
-class GenericAgent(mesa.Agent):
-    """Agente genérico, que pode ser 'Air' ou 'Wind'."""
-    def __init__(self, unique_id, model, agent_type, netlogo):
-        self.netlogo = netlogo
+class PatchAgent(Agent):
+    def __init__(self, unique_id, model, pos):
+        # Inicializa manualmente os atributos necessários
         self.unique_id = unique_id
         self.model = model
-        self.agent_type = agent_type
-        self.wealth = 1
+        self.pos = pos  # Posição na grid
+        self.state = "forested"  # Possíveis estados: "forested", "burning", "burned"
+        self.pcolor = 55  # Valor inicial que mapeia para "verde"
 
-        if agent_type == "Wind":
-            self.wind_speed = 10
-            self.wind_direction = 15
-            self.netlogo.command(f"set wind-speed {self.wind_speed}")
-            self.netlogo.command(f"set wind-direction {self.wind_direction}")
+    def step(self):
+        if self.state == "forested":
+            neighbors = self.model.grid.get_neighbors(self.pos, moore=False)
+            if any(neighbor.state == "burning" for neighbor in neighbors):
+                if random.random() < 0.3:
+                    self.state = "burning"
+                    self.pcolor = 25  # Valor para fogo (laranja)
+        elif self.state == "burning":
+            self.state = "burned"
+            self.pcolor = 5  # Valor para queimado (cinzento)
 
-        elif agent_type == "Air":
-            self.co_level = self.netlogo.report('co-level')
-            self.co2_level = self.netlogo.report('co2-level')
-            self.pm2_5_level = self.netlogo.report('pm2_5-level')
-            self.pm10_level = self.netlogo.report('pm10-level')
-            self.o2_level = self.netlogo.report('o2-level')
+class AirAgent(Agent):
+    def __init__(self, unique_id, model):
+        self.unique_id = unique_id
+        self.model = model
+        self.co_level = 0.0
+        self.co2_level = 400.0
+        self.pm2_5_level = 0.0
+        self.pm10_level = 0.0
+        self.o2_level = 21000.0
 
-    def atualizacao_air(self):
-        """Atualiza as variáveis de ar no NetLogo e retorna 'Perigo' ou 'Seguro'."""
-        self.co_level = self.netlogo.report('co-level')
-        self.co2_level = self.netlogo.report('co2-level')
-        self.pm2_5_level = self.netlogo.report('pm2_5-level')
-        self.pm10_level = self.netlogo.report('pm10-level')
-        self.o2_level = self.netlogo.report('o2-level')
+    def step(self):
+        burning = sum(1 for agent in self.model.schedule if hasattr(agent, "state") and agent.state == "burning")
+        self.co_level = burning * 2.0
+        self.co2_level = 400.0 + burning * 5.0
+        self.pm2_5_level = burning * 1.0
+        self.pm10_level = burning * 1.0
+        self.o2_level = max(21000.0 - burning * 10.0, 15000.0)
 
+    def get_air_status(self):
         if (self.o2_level <= 20000 or self.co_level >= 10 or 
             self.co2_level >= 1000 or self.pm10_level >= 100 or 
             self.pm2_5_level >= 100):
             return "Perigo"
         return "Seguro"
-
-    def direction_wind(self):
-        """Retorna uma string descrevendo a direção do vento."""
-        if self.wind_direction < 22.5 or self.wind_direction >= 337.5:
-            return "Incêndio com vento em direção a Sul"
-        elif 22.5 <= self.wind_direction < 67.5:
-            return "Incêndio com vento em direção a Sudoeste"
-        elif 67.5 <= self.wind_direction < 112.5:
-            return "Incêndio com vento em direção a Oeste"
-        elif 112.5 <= self.wind_direction < 157.5:
-            return "Incêndio com vento em direção a Noroeste"
-        elif 157.5 <= self.wind_direction < 202.5:
-            return "Incêndio com vento em direção a Norte"
-        elif 202.5 <= self.wind_direction < 247.5:
-            return "Incêndio com vento em direção a Nordeste"
-        elif 247.5 <= self.wind_direction < 292.5:
-            return "Incêndio com vento em direção a Este"
-        elif 292.5 <= self.wind_direction < 337.5:
-            return "Incêndio com vento em direção a Sudeste"
-
-
-class AnimalsAgent(mesa.Agent):
-    """Agente que representa animais com sensores direcionais."""
-    def __init__(self, unique_id, model, netlogo):
-        self.netlogo = netlogo
-        self.unique_id = unique_id
-        self.model = model
-        self.sensor = None
-        self.detection = 0  # 1 => detectou incêndio, 0 => não
-
-    def set_sensor(self, direction):
-        """Define a direção do sensor (N, S, O, E)."""
-        self.sensor = direction
-
-    def alerta(self):
-        """
-        Verifica se há 'escaped' acima de 50 para a direção que o agente monitora.
-        Se sim, detection = 1 (incêndio), caso contrário 0.
-        """
-        if self.netlogo.report('escaped-north') > 50 and self.sensor == "N":
-            self.detection = 1
-            return "Incêndio"
-        elif self.netlogo.report('escaped-south') > 50 and self.sensor == "S":
-            self.detection = 1
-            return "Incêndio"
-        elif self.netlogo.report('escaped-west') > 50 and self.sensor == "O":
-            self.detection = 1
-            return "Incêndio"
-        elif self.netlogo.report('escaped-east') > 50 and self.sensor == "E":
-            self.detection = 1
-            return "Incêndio"
-        else:
-            self.detection = 0
-            return "Sem incêndios"
