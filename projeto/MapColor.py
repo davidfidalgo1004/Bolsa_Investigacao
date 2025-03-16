@@ -1,7 +1,9 @@
 def EncontrarCor(pcolor_value):
-    #Mapeia o valor de pcolor para uma cor com base em intervalos.
-    #Ajuste os intervalos e cores conforme a sua simulação.
-    if (pcolor_value % 10) == 9 :
+    if pcolor_value == 85:
+        return "#2F4F4F"   # Estrada: cinza escuro
+    if pcolor_value == 95:
+        return "#1E90FF"   # Rio: azul
+    if (pcolor_value % 10) == 9:
         return "#FFFFFF"   # Branco
     elif 1 <= pcolor_value < 9:
         return "#808080"   # Cinzento
@@ -13,9 +15,12 @@ def EncontrarCor(pcolor_value):
         return "#8B4513"   # Castanho
     elif 41 <= pcolor_value < 49:
         return "#FFFF00"   # Amarelo
-    elif 51 <= pcolor_value < 59 or 61 <= pcolor_value < 69:
-        return "#00FF00"   # Verde
+    elif 51 <= pcolor_value < 59 or 61 <= pcolor_value < 80:
+        if pcolor_value == 55:
+            return "#006400"   # Verde (floresta)
+        else:
+            return "#32CD32"
     elif 81 <= pcolor_value < 89 or 91 <= pcolor_value < 99:
-        return "#00FF00"   # Azul
+        return "#00FF00"
     else:
         return "#000000"   # Preto

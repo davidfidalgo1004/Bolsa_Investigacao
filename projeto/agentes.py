@@ -1,6 +1,3 @@
-import random  # Para operações probabilísticas
-from mesa import Agent  # Importa a classe base Agent da Mesa
-
 import math
 import random
 from mesa import Agent
@@ -11,108 +8,106 @@ class PatchAgent(Agent):
         self.model = model
         self.pos = pos
         self.state = "forested"
-        self.pcolor = 55  # Cor verde para florestado
-        # Define a altitude para todos os patches
+        self.pcolor = 55  # Cor verde para patch florestado
+        # Define a altitude para o patch (valor entre 0 e 100)
         self.altitude = random.uniform(0, 100)
-        # Para patches florestados, define a altura da árvore
+        # Para patches florestados, define a altura da árvore (entre 5 e 15)
         if self.state == "forested":
             self.tree_height = random.uniform(5, 15)
         else:
             self.tree_height = 0
         self.burn_time = None
 
+    def startfirepatch(self, patch):
+        patch.state = "burning"
+        patch.pcolor = 15
+        patch.burn_time = None
+    
     def step(self):
-        if self.state == "forested":
-            # Aqui você pode deixar a ignição "passiva" – ou seja, ser incendiado pelos vizinhos.
-            pass
-
-        elif self.state == "burning":
-            # Inicializa o tempo de queima se ainda não estiver definido
+        if self.state == "burning":
             if self.burn_time is None:
                 self.burn_time = random.randint(5, 8)
-                self.pcolor = 25  # vermelho para indicar que está queimando
+                self.pcolor = 15  # Indica que está queimando
 
-            # Propaga o fogo para vizinhos na vizinhança (raio 2)
-            neighbors = self.model.grid.get_neighbors(
-                self.pos, moore=True, include_center=False, radius=2
-            )
-            for neighbor in neighbors:
-                if hasattr(neighbor, "state") and neighbor.state == "forested":
-                    # Obter parâmetros ambientais do modelo (ou usar defaults)
-                    wind_direction = getattr(self.model, "wind_direction", 0)
-                    wind_speed = getattr(self.model, "wind_speed", 2)
-                    rain_level = getattr(self.model, "rain_level", 0)
+            raio = 20
+            cx, cy = self.pos
 
-                    # Calcular ângulo do patch atual para o vizinho
-                    dx = neighbor.pos[0] - self.pos[0]
-                    dy = neighbor.pos[1] - self.pos[1]
-                    angle_to_neighbor = (math.degrees(math.atan2(dy, dx)) + 360) % 360
-                    # Calcula a menor diferença angular
-                    angle_diff = abs((wind_direction - angle_to_neighbor + 180) % 360 - 180)
-                    is_wind_favored = angle_diff <= 60
+            min_x = max(0, cx - raio)
+            max_x = min(self.model.world_width - 1, cx + raio)
+            min_y = max(0, cy - raio)
+            max_y = min(self.model.world_height - 1, cy + raio)
 
-                    # Obter alturas e altitudes (usar valores padrão se não definidos)
-                    source_height = getattr(self, "tree_height", 10)
-                    neighbor_height = getattr(neighbor, "tree_height", 10)
-                    source_altitude = getattr(self, "altitude", 50)
-                    neighbor_altitude = getattr(neighbor, "altitude", 50)
+            for x in range(min_x, max_x + 1):
+                for y in range(min_y, max_y + 1):
+                    distancia = math.sqrt((x - cx)**2 + (y - cy)**2)
+                    if distancia <= raio:
+                        # Probabilidade base decai linearmente com a distância
+                        base_prob = (raio - distancia) / raio
 
-                    # Multiplicador baseado na diferença de altura
-                    tree_multiplier = max(0.1, 1 + (source_height - neighbor_height) / 10)
-                    # Multiplicador baseado na diferença de altitude
-                    alt_multiplier = max(0.1, 1 + (source_altitude - neighbor_altitude) / 100)
+                        # Fatores ambientais:
+                        # 1) Altitude: quanto maior a altitude, maior o fator (mais seco)
+                        altitude_factor = (1/self.altitude)
 
-                    # Calcular probabilidade base
-                    if is_wind_favored:
-                        # Função semelhante a calc-wind-probability do NetLogo
-                        base_prob = min(0.3 + wind_speed * 0.05, 0.8) * tree_multiplier * 2.0
-                    else:
-                        base_prob = 0.3 * tree_multiplier * 2.0
+                        # 2) Precipitação: quanto maior a chuva, menor a chance de queimar
+                        precip_factor = (1 - self.model.rain_level)
 
-                    effective_prob = base_prob * alt_multiplier * (1 - rain_level)
+                        # 3) Altura da árvore: normaliza entre 5 e 15 (valor entre ~0.33 e 1)
+                        height_factor = self.tree_height / 15.0
 
-                    if random.random() < effective_prob:
-                        # Incendeia o vizinho
-                        neighbor.state = "burning"
-                        neighbor.pcolor = 25
-                        neighbor.burn_time = None
+                        # 4) Umidade: exemplo simples derivado da altitude
+                        humidity = 0.5 - 0.003 * self.altitude  
+                        humidity = max(0, min(1, humidity))
+                        humidity_factor = (1 - humidity)
 
-            # Atualiza o tempo de queima e, se terminar, muda para "burned"
+                        # Combina os fatores multiplicativamente
+                        combined_factor = altitude_factor + precip_factor + height_factor + humidity_factor
+
+                        #a base probabilistica tem a haver que quanto mais longe, menos probabilidade há para um determinado patch arder
+                        final_prob = base_prob * combined_factor
+
+                        patches = self.model.grid.get_cell_list_contents((x, y))
+                        for patch in patches:
+                            if getattr(patch, "state", None) == "forested":
+                                if random.random() < final_prob:
+                                    patch.state = "burning"
+                                    patch.pcolor = 15
+                                    patch.burn_time = None
+
             self.burn_time -= 1
             if self.burn_time <= 0:
                 self.state = "burned"
-                self.pcolor = 5  # cor para queimado (cinza)
-
-        # Se o patch estiver "burned" ou em outro estado, não realiza ação
-
+                self.pcolor = 5  # Cor para patch queimado (cinza)
 
 class AirAgent(Agent):
     def __init__(self, unique_id, model):
-        # Inicializa os atributos do agente de ar
-        self.unique_id = unique_id  # Identificador único
-        self.model = model          # Referência ao modelo
-        # Define os níveis iniciais dos poluentes e oxigênio
-        self.co_level = 0.1         # Nível de monóxido de carbono (CO)
-        self.co2_level = 400.0      # Nível de dióxido de carbono (CO₂), valor base
-        self.pm2_5_level = 25.0      # Nível de partículas PM2.5
-        self.pm10_level = 10.0       # Nível de partículas PM10
-        self.o2_level = 21000.0     # Nível de oxigênio (O₂)
+        self.unique_id = unique_id
+        self.model = model
+        self.co_level = 0.1         # Monóxido de Carbono (CO)
+        self.co2_level = 400.0      # Dióxido de Carbono (CO₂)
+        self.pm2_5_level = 25.0     # Partículas PM2.5
+        self.pm10_level = 10.0      # Partículas PM10
+        self.o2_level = 21000.0     # Oxigênio (O₂)
 
     def step(self):
-        # Conta quantos patches estão em estado "burning" na simulação
         burning = sum(1 for agent in self.model.schedule if hasattr(agent, "state") and agent.state == "burning")
-        # Atualiza os níveis dos poluentes proporcionalmente ao número de patches em chamas
-        self.co_level = 0.1 + burning * 2.0
-        self.co2_level = 400.0 + burning * 5.0
-        self.pm2_5_level = 25 + burning * 1.0
-        self.pm10_level = 10 + burning * 1.0
-        # O nível de oxigênio diminui com o aumento do fogo, mas não pode ser inferior a 15000
-        self.o2_level = max(21000.0 - burning * 10.0, 15000.0)
+        
+        target_co = 0.1 + burning * 2.0
+        target_co2 = 400.0 + burning * 5.0
+        target_pm2_5 = 25.0 + burning * 1.0
+        target_pm10 = 10.0 + burning * 1.0
+        target_o2 = max(21000.0 - burning * 10.0, 15000.0)
+        
+        decay = 0.1
+        
+        self.co_level += (target_co - self.co_level) * decay
+        self.co2_level += (target_co2 - self.co2_level) * decay
+        self.pm2_5_level += (target_pm2_5 - self.pm2_5_level) * decay
+        self.pm10_level += (target_pm10 - self.pm10_level) * decay
+        self.o2_level += (target_o2 - self.o2_level) * decay
 
     def get_air_status(self):
-        # Verifica se algum dos parâmetros ultrapassa os limites de segurança
         if (self.o2_level <= 20000 or self.co_level >= 10 or 
             self.co2_level >= 1000 or self.pm10_level >= 100 or 
             self.pm2_5_level >= 100):
-            return "Perigo"  # Condições de ar perigosas
-        return "Seguro"  # Caso contrário, as condições são seguras
+            return "Perigo"
+        return "Seguro"
