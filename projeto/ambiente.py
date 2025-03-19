@@ -28,7 +28,6 @@ class EnvironmentModel(Model):
         for x in range(width):
             for y in range(height):
                 patch = PatchAgent(agent_id, self, (x, y))
-                
                 # ---------------------------
                 # 1) Estrada + Árvores
                 # ---------------------------
@@ -55,19 +54,20 @@ class EnvironmentModel(Model):
                 else:  # "only_trees"
                     self._make_forest_patch(patch, density, eucalyptus_percentage)
                 
-                self.schedule.append(patch)
+                self.schedule.append(patch) #onde vai ficar guardado a lista de patchs
+
                 self.grid.place_agent(patch, (x, y))
                 agent_id += 1
 
         # Adiciona agente de ar
         self.air_agent = AirAgent(agent_id, self)
         self.schedule.append(self.air_agent)
-
         # Parâmetros de clima
         self.temperature = 25.0
         self.wind_direction = 0
         self.wind_speed = 2
-        self.rain_level = 0  # Precipitação: 0 sem chuva, 1 chuva intensa
+        self.rain_level = 0  
+        self.humidity = 0
 
     def _make_forest_patch(self, patch, density, eucalyptus_percentage):
         """Define se o patch será vazio ou terá árvore (e qual tipo)."""

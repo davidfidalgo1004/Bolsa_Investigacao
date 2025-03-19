@@ -1,6 +1,7 @@
 import math
 import random
 from mesa import Agent
+from ProbVento import Ignicaoprob
 
 class PatchAgent(Agent):
     def __init__(self, unique_id, model, pos):
@@ -10,7 +11,8 @@ class PatchAgent(Agent):
         self.state = "forested"
         self.pcolor = 55  # Cor verde para patch florestado
         # Define a altitude para o patch (valor entre 0 e 100)
-        self.altitude = random.uniform(0, 100)
+        # consideramos tudo com altitude 0 -> Rio
+        self.altitude = random.uniform(1, 100)
         # Para patches florestados, define a altura da árvore (entre 5 e 15)
         if self.state == "forested":
             self.tree_height = random.uniform(5, 15)
@@ -29,7 +31,7 @@ class PatchAgent(Agent):
                 self.burn_time = random.randint(5, 8)
                 self.pcolor = 15  # Indica que está queimando
 
-            raio = 20
+            raio = 2
             cx, cy = self.pos
 
             min_x = max(0, cx - raio)
@@ -37,30 +39,39 @@ class PatchAgent(Agent):
             min_y = max(0, cy - raio)
             max_y = min(self.model.world_height - 1, cy + raio)
 
+            alfadistancia=0.1
+            alfaaltitude=0.1
+            alfahumidade=0.2
+            alfaprecipitação=0.2
+            alfadirecaovelocidadevento=0.3
+            alfaalturaarvore = 0.1
+
             for x in range(min_x, max_x + 1):
                 for y in range(min_y, max_y + 1):
                     distancia = math.sqrt((x - cx)**2 + (y - cy)**2)
-                    if distancia <= raio:
+                    if distancia <= raio and distancia>0:
                         # Probabilidade base decai linearmente com a distância
-                        base_prob = (raio - distancia) / raio
+                        base_prob = (1/distancia)
 
                         # Fatores ambientais:
                         # 1) Altitude: quanto maior a altitude, maior o fator (mais seco)
-                        altitude_factor = (1/self.altitude)
+                        altitude_factor = (1/self.altitude) * alfaaltitude
 
                         # 2) Precipitação: quanto maior a chuva, menor a chance de queimar
-                        precip_factor = (1 - self.model.rain_level)
+                        precip_factor = (1 - self.model.rain_level) * alfaprecipitação
 
-                        # 3) Altura da árvore: normaliza entre 5 e 15 (valor entre ~0.33 e 1)
-                        height_factor = self.tree_height / 15.0
+                        # 3) Altura da árvore
+                        height_factor = self.tree_height * alfaalturaarvore
 
-                        # 4) Umidade: exemplo simples derivado da altitude
-                        humidity = 0.5 - 0.003 * self.altitude  
+                        # 4) Humidade
+                        humidity = self.model.humidity * self.altitude  
                         humidity = max(0, min(1, humidity))
                         humidity_factor = (1 - humidity)
 
-                        # Combina os fatores multiplicativamente
-                        combined_factor = altitude_factor + precip_factor + height_factor + humidity_factor
+                        # 5) Vento
+                        wind_factor = Ignicaoprob(1, self.model.wind_speed,cx,cy,x,y,self.model.wind_direction) * alfadirecaovelocidadevento
+                        # Somatorio  dos fatores
+                        combined_factor = wind_factor + altitude_factor + precip_factor + height_factor + humidity_factor
 
                         #a base probabilistica tem a haver que quanto mais longe, menos probabilidade há para um determinado patch arder
                         final_prob = base_prob * combined_factor

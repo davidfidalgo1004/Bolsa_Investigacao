@@ -96,61 +96,69 @@ class SimulationApp(QMainWindow):
 
     def create_controls_row(self):
         controls_widget = QWidget()
-        controls_layout = QHBoxLayout(controls_widget)
+        controls_layout = QVBoxLayout(controls_widget)
         controls_layout.setSpacing(5)
 
+        row1 = QHBoxLayout()
         iter_label = QLabel("Iterações:")
-        controls_layout.addWidget(iter_label)
+        row1.addWidget(iter_label)
         self.iter_slider = QSlider(Qt.Horizontal)
         self.iter_slider.setRange(10, 500)
         self.iter_slider.setValue(100)
-        controls_layout.addWidget(self.iter_slider)
-
-        density_label = QLabel("Densidade Florestal:")
-        controls_layout.addWidget(density_label)
-        self.density_slider = QSlider(Qt.Horizontal)
-        self.density_slider.setRange(0, 100)
-        self.density_slider.setValue(int(self.forest_density * 100))
-        controls_layout.addWidget(self.density_slider)
-
-        # Slider para Precipitação
-        precip_label = QLabel("Precipitação (%):")
-        controls_layout.addWidget(precip_label)
-        self.precip_slider = QSlider(Qt.Horizontal)
-        self.precip_slider.setRange(0, 100)
-        self.precip_slider.setValue(0)
-        controls_layout.addWidget(self.precip_slider)
-
-        # RadioButtons para seleção de ambiente
+        row1.addWidget(self.iter_slider)
         self.env_type_group = QButtonGroup()
         self.radio_only_trees = QRadioButton("Somente Árvores")
         self.radio_road_trees = QRadioButton("Estrada + Árvores")
         self.radio_river_trees = QRadioButton("Rio + Árvores")
         self.radio_only_trees.setChecked(True)
-
-        self.env_type_group.addButton(self.radio_only_trees)
-        self.env_type_group.addButton(self.radio_road_trees)
-        self.env_type_group.addButton(self.radio_river_trees)
-
-        controls_layout.addWidget(self.radio_only_trees)
-        controls_layout.addWidget(self.radio_road_trees)
-        controls_layout.addWidget(self.radio_river_trees)
-
+        for btn in [self.radio_only_trees, self.radio_road_trees, self.radio_river_trees]:
+            self.env_type_group.addButton(btn)
+            row1.addWidget(btn)
         self.setup_button = QPushButton("Setup")
         self.setup_button.clicked.connect(self.setup_model)
-        controls_layout.addWidget(self.setup_button)
-
+        row1.addWidget(self.setup_button)
         self.run_button = QPushButton("Iniciar Simulação")
         self.run_button.clicked.connect(self.run_simulation)
-        controls_layout.addWidget(self.run_button)
-
+        row1.addWidget(self.run_button)
         self.stop_fire_button = QPushButton("Apagar Fogo")
         self.stop_fire_button.clicked.connect(self.stop_fire)
-        controls_layout.addWidget(self.stop_fire_button)
-
+        row1.addWidget(self.stop_fire_button)
         self.fire_status_label = QLabel("Incêndio: Inativo (Temp: -- °C)")
-        controls_layout.addWidget(self.fire_status_label)
+        row1.addWidget(self.fire_status_label)
+        controls_layout.addLayout(row1)
 
+        row2 = QHBoxLayout()
+        wind_speed_label = QLabel("Vento (m/s):")
+        row2.addWidget(wind_speed_label)
+        self.wind_speed_slider = QSlider(Qt.Horizontal)
+        self.wind_speed_slider.setRange(1, 15)
+        self.wind_speed_slider.setValue(4)
+        row2.addWidget(self.wind_speed_slider)
+        wind_direction_label = QLabel("Direção Vento (º):")
+        row2.addWidget(wind_direction_label)
+        self.wind_direction_slider = QSlider(Qt.Horizontal)
+        self.wind_direction_slider.setRange(1, 15)
+        self.wind_direction_slider.setValue(4)
+        row2.addWidget(self.wind_direction_slider)
+        density_label = QLabel("Densidade Florestal:")
+        row2.addWidget(density_label)
+        self.density_slider = QSlider(Qt.Horizontal)
+        self.density_slider.setRange(0, 100)
+        self.density_slider.setValue(int(self.forest_density * 100))
+        row2.addWidget(self.density_slider)
+        precip_label = QLabel("Precipitação (%):")
+        row2.addWidget(precip_label)
+        self.precip_slider = QSlider(Qt.Horizontal)
+        self.precip_slider.setRange(0, 100)
+        self.precip_slider.setValue(50)
+        row2.addWidget(self.precip_slider)
+        humid_label = QLabel("Humidade (%):")
+        row2.addWidget(humid_label)
+        self.humid_slider = QSlider(Qt.Horizontal)
+        self.humid_slider.setRange(0, 100)
+        self.humid_slider.setValue(15)
+        row2.addWidget(self.humid_slider)
+        controls_layout.addLayout(row2)
         self.main_layout.addWidget(controls_widget, 0, 0, 1, 2)
 
     def add_log(self, message: str):
@@ -172,12 +180,12 @@ class SimulationApp(QMainWindow):
         self.burned_area_evol.clear()
         self.forested_area_evol.clear()
         self.timesteps.clear()
+        if(self.model.env_type == "river_trees"):
+            self.model.wind_direction = self.wind_direction_slider.value() * 1.1 
+            #mais 10% da humidade por causa do rio
 
-        wind_direction = random.randint(0, 360)
-        wind_speed = random.randint(1, 15)
-
-        self.model.wind_direction = wind_direction
-        self.model.wind_speed = wind_speed
+        self.model.wind_direction = self.wind_direction_slider.value()
+        self.model.wind_speed = self.wind_speed_slider.value()
         self.model.rain_level = self.precip_slider.value() / 100.0
 
         self.model = EnvironmentModel(
@@ -186,8 +194,9 @@ class SimulationApp(QMainWindow):
             density=self.forest_density,
             env_type=chosen_env
         )
-        self.model.wind_direction = wind_direction
-        self.model.wind_speed = wind_speed
+        self.model.wind_direction = self.wind_direction_slider.value()
+        self.model.wind_speed = self.wind_speed_slider.value()
+        self.model.humidity = self.humid_slider.value()
         self.model.rain_level = self.precip_slider.value() / 100.0
 
         for row in range(self.world_height):
@@ -229,9 +238,6 @@ class SimulationApp(QMainWindow):
         # Atualiza a precipitação conforme o slider
         self.model.rain_level = self.precip_slider.value() / 100.0
 
-        if random.random() < 0.1:
-            self.model.start_fire()
-
         self.model.step()
 
         air_agent = self.model.air_agent
@@ -258,7 +264,8 @@ class SimulationApp(QMainWindow):
         self.timesteps.append(self.current_iteration)
 
         self.add_log(f"Iteração {self.current_iteration} | Queimadas: {burned}, Florestadas: {forested}")
-
+        if random.random() < 0.1:
+            self.model.start_fire()
         self.update_grid()
         self.current_iteration += 1
 
