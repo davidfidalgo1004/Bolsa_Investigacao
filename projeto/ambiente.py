@@ -18,7 +18,7 @@ class EnvironmentModel(Model):
         self.world_height = height
         self.grid = MultiGrid(width, height, torus=False)
         self.schedule = []
-        
+
         self.env_type = env_type
         # Vamos criar a estrada ou rio sempre no meio (você pode personalizar):
         road_y = height // 2
@@ -35,6 +35,7 @@ class EnvironmentModel(Model):
                     if abs(y - road_y) <= 1:
                         patch.state = "road"
                         patch.pcolor = 85  # cor estrada
+                        patch.altitude = 0
                     else:
                         self._make_forest_patch(patch, density, eucalyptus_percentage)
 
@@ -45,6 +46,7 @@ class EnvironmentModel(Model):
                     if abs(y - river_y) <= 1:
                         patch.state = "river"
                         patch.pcolor = 95  # cor rio
+                        patch.altitude = 0
                     else:
                         self._make_forest_patch(patch, density, eucalyptus_percentage)
 
@@ -53,20 +55,20 @@ class EnvironmentModel(Model):
                 # ---------------------------
                 else:  # "only_trees"
                     self._make_forest_patch(patch, density, eucalyptus_percentage)
-                
-                self.schedule.append(patch) #onde vai ficar guardado a lista de patchs
 
+                self.schedule.append(patch)
                 self.grid.place_agent(patch, (x, y))
                 agent_id += 1
 
         # Adiciona agente de ar
         self.air_agent = AirAgent(agent_id, self)
         self.schedule.append(self.air_agent)
+
         # Parâmetros de clima
         self.temperature = 25.0
         self.wind_direction = 0
         self.wind_speed = 2
-        self.rain_level = 0  
+        self.rain_level = 0
         self.humidity = 0
 
     def _make_forest_patch(self, patch, density, eucalyptus_percentage):
@@ -79,11 +81,14 @@ class EnvironmentModel(Model):
             if random.random() < eucalyptus_percentage:
                 patch.tree_type = "eucalyptus"
                 patch.pcolor = 75  # eucalipto
+                patch.factor_type_tree = 0.8
             else:
                 patch.tree_type = "pine"
                 patch.pcolor = 55  # pinheiro
+                patch.factor_type_tree = 0.5
 
     def step(self):
+        """Executa um passo de simulação em todos os agentes, ajusta temperatura."""
         for agent in self.schedule:
             agent.step()
 
@@ -91,9 +96,9 @@ class EnvironmentModel(Model):
         target_temp = 25.0 + burning * 0.5
         decay = 0.1
         self.temperature += (target_temp - self.temperature) * decay
-        
 
     def start_fire(self):
+        """Inicia o fogo em um patch florestado aleatório."""
         forested_patches = [a for a in self.schedule if getattr(a, "state", None) == "forested"]
         if forested_patches:
             chosen = random.choice(forested_patches)
@@ -101,6 +106,7 @@ class EnvironmentModel(Model):
             chosen.pcolor = 15  # vermelho
 
     def stop_fire(self):
+        """Para o fogo manualmente (todos os patches burning ficam burned)."""
         for agent in self.schedule:
             if getattr(agent, "state", None) == "burning":
                 agent.state = "burned"

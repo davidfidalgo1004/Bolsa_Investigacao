@@ -35,7 +35,5 @@ def Ignicaoprob(p0, wind_velocidade, i, j, k, l, wind_angle_deg):
     delta = alpha - wind_angle_rad
     cos_delta = math.cos(delta) 
     w =cos_delta * r 
-    if w<0:
-        return 0
     return w
 
