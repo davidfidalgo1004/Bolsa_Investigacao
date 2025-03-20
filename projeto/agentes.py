@@ -39,12 +39,12 @@ class PatchAgent(Agent):
             min_y = max(0, cy - raio)
             max_y = min(self.model.world_height - 1, cy + raio)
 
-            alfadistancia=0.1
-            alfaaltitude=0.1
-            alfahumidade=0.2
-            alfaprecipitação=0.2
-            alfadirecaovelocidadevento=0.3
-            alfaalturaarvore = 0.1
+            alfadistancia=0.2
+            alfaaltitude=0.05
+            alfahumidade=0.3
+            alfaprecipitação=0.4
+            alfadirecaovelocidadevento=0.1
+            alfaalturaarvore = 0.05
 
             for x in range(min_x, max_x + 1):
                 for y in range(min_y, max_y + 1):
@@ -56,7 +56,7 @@ class PatchAgent(Agent):
                         # Fatores ambientais:
                         # 1) Altitude: quanto maior a altitude, maior o fator (mais seco)
                         altitude_factor = (1/self.altitude) * alfaaltitude
-
+                        
                         # 2) Precipitação: quanto maior a chuva, menor a chance de queimar
                         precip_factor = (1 - self.model.rain_level) * alfaprecipitação
 
@@ -64,9 +64,8 @@ class PatchAgent(Agent):
                         height_factor = self.tree_height * alfaalturaarvore
 
                         # 4) Humidade
-                        humidity = self.model.humidity * self.altitude  
-                        humidity = max(0, min(1, humidity))
-                        humidity_factor = (1 - humidity)
+
+                        humidity_factor = (1/self.model.humidity) *alfahumidade
 
                         # 5) Vento
                         wind_factor = Ignicaoprob(1, self.model.wind_speed,cx,cy,x,y,self.model.wind_direction) * alfadirecaovelocidadevento

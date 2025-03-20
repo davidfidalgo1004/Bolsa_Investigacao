@@ -155,7 +155,7 @@ class SimulationApp(QMainWindow):
         humid_label = QLabel("Humidade (%):")
         row2.addWidget(humid_label)
         self.humid_slider = QSlider(Qt.Horizontal)
-        self.humid_slider.setRange(0, 100)
+        self.humid_slider.setRange(1, 100)
         self.humid_slider.setValue(15)
         row2.addWidget(self.humid_slider)
         controls_layout.addLayout(row2)
@@ -181,7 +181,9 @@ class SimulationApp(QMainWindow):
         self.forested_area_evol.clear()
         self.timesteps.clear()
         if(self.model.env_type == "river_trees"):
-            self.model.wind_direction = self.wind_direction_slider.value() * 1.1 
+            self.model.wind_direction = self.wind_direction_slider.value() +30
+            if  self.model.wind_direction > 100:
+                self.model.wind_direction = 100
             #mais 10% da humidade por causa do rio
 
         self.model.wind_direction = self.wind_direction_slider.value()
