@@ -49,7 +49,7 @@ class PatchAgent(Agent):
             if self.burn_time is None:
                 if self.tree_type == "eucalyptus":
                     self.burn_time = random.randint(2, 4)
-                if self.tree_type == "eucalyptus":
+                else:
                     self.burn_time = random.randint(4, 6)
                 self.pcolor = 15  # Indica que está a queimar
 
