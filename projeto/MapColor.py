@@ -22,5 +22,7 @@ def EncontrarCor(pcolor_value):
             return "#32CD32"
     elif 81 <= pcolor_value < 89 or 91 <= pcolor_value < 99:
         return "#00FF00"
+    elif pcolor_value == 105:
+        return "#2c34b4"
     else:
         return "#000000"   # Preto

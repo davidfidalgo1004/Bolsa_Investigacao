@@ -3,6 +3,72 @@ import random
 from mesa import Agent
 from ProbVento import Ignicaoprob
 
+class FragulhaAgent(Agent):
+    def __init__(self, unique_id, model, origin_pos):
+        super().__init__(model)
+        self.unique_id = unique_id
+        self.model = model
+        
+        # Posição inicial e trajetória
+        self.origin_pos = origin_pos
+        self.pos = origin_pos
+        self.path = [origin_pos]  # Guarda histórico de posições
+        
+        self.pcolor = 105
+        self.new_pos = self.compute_target_position()
+
+    def compute_target_position(self):
+        """
+        Calcula a nova posição com base na direção do vento e na sua velocidade.
+        Quanto maior a velocidade do vento, maior a distância percorrida.
+        """
+        ox, oy = self.origin_pos
+        angle = math.radians(self.model.wind_direction)
+        # Distância aleatória que escala com a velocidade do vento (mínimo 1 de velocidade)
+        dist = random.uniform(2, 6) * max(self.model.wind_speed, 1)
+        dx = int(round(math.cos(angle) * dist))
+        dy = int(round(math.sin(angle) * dist))
+        nx = min(max(ox + dx, 0), self.model.world_width - 1)
+        ny = min(max(oy + dy, 0), self.model.world_height - 1)
+        return (nx, ny)
+
+    def step(self):
+        # Move-se para a new_pos
+        x, y = self.new_pos
+        self.pos = (x, y)
+        self.path.append((x, y))  # Registra no histórico
+
+        # Probabilidade de incendiar o patch se ele estiver florestado
+        # Ajuste conforme desejar (aqui definimos 60% de chance).
+        ignition_chance = 0.60
+
+        # Verifica o patch onde caiu
+        patches = self.model.grid.get_cell_list_contents((x, y))
+        for patch in patches:
+            # Se for floresta, há probabilidade de incendiar
+            if getattr(patch, "state", None) == "forested":
+                if random.random() < ignition_chance:
+                    patch.state = "burning"
+                    patch.pcolor = 15
+                    patch.burn_time = None
+                # senão, não incendeia
+                break  # Basta afetar um PatchAgent na célula
+
+        # Salva o trajeto final da fragulha no dicionário do modelo
+        self.model.fragulha_history[self.unique_id] = self.path
+
+        # Remover a fragulha do scheduler e da grelha para não gerar loop infinito
+        if self in self.model.schedule:
+            try:
+                self.model.schedule.remove(self)
+            except ValueError:
+                pass
+
+        try:
+            self.model.grid.remove_agent(self)
+        except ValueError:
+            pass
+
 class PatchAgent(Agent):
     def __init__(self, unique_id, model, pos):
         super().__init__(model)
@@ -15,6 +81,7 @@ class PatchAgent(Agent):
         self.factor_type_tree = 0
         # Define a altitude para o patch (valor entre 0 e 100)
         self.altitude = self.calculate_altitude(pos[0], pos[1])
+        self.dangered_time = 0
 
         # Para patches florestados, define a altura da árvore (entre 5 e 15)
         if self.state == "forested":
@@ -28,7 +95,6 @@ class PatchAgent(Agent):
         """
         Calcula a altitude de forma mais realista, sem depender de rios ou estradas fixos.
         """
-        # Criar variação suave da altitude usando senos/cossenos e ruído
         altitude_variation = (
             math.sin(x / self.model.world_width * math.pi)
             + math.cos(y / self.model.world_height * math.pi)
@@ -44,8 +110,16 @@ class PatchAgent(Agent):
         patch.burn_time = None
 
     def step(self):
-        """Lógica principal de queima de cada patch se estiver em combustão."""
+        if self.state == "dangered":
+            self.dangered_time += 1
+            if self.dangered_time >= 10:
+                self.state = "forested"
+                self.pcolor = 55
+                self.dangered_time = 0
+            return
+
         if self.state == "burning":
+            # Define burn_time quando começa a queimar
             if self.burn_time is None:
                 if self.tree_type == "eucalyptus":
                     self.burn_time = random.randint(2, 4)
@@ -106,9 +180,9 @@ class PatchAgent(Agent):
 
                         patches = self.model.grid.get_cell_list_contents((x, y))
                         for patch in patches:
-                            if getattr(patch, "state", None) == "forested" or getattr(patch, "state", None) == "dangered":
+                            if getattr(patch, "state", None) in ("forested", "dangered"):
                                 # Aleatoriedade extra
-                                numrandom = random.choice([random.random() for _ in range(3)])
+                                numrandom = random.random()
                                 if numrandom < final_prob:
                                     patch.state = "burning"
                                     patch.pcolor = 15
@@ -116,9 +190,21 @@ class PatchAgent(Agent):
                                 else:
                                     patch.state = "dangered"
                                     patch.pcolor = 45
-                                    
 
-            # Tempo de queima diminui a cada step
+            # ==== CRIA FRAGULHAS A VOAR (20% de chance) ====
+            if random.random() < 0.20:
+                from agentes import FragulhaAgent
+                new_f = FragulhaAgent(
+                    self.model.agent_id_counter,
+                    self.model,
+                    self.pos
+                )
+                self.model.agent_id_counter += 1
+                self.model.schedule.append(new_f)
+                self.model.grid.place_agent(new_f, self.pos)
+            # ==============================================
+
+            # Diminui o tempo de queima
             self.burn_time -= 1
             if self.burn_time <= 0:
                 self.state = "burned"
@@ -136,7 +222,10 @@ class AirAgent(Agent):
 
     def step(self):
         """A cada passo, ajusta a qualidade do ar conforme a quantidade de fogo."""
-        burning = sum(1 for agent in self.model.schedule if getattr(agent, "state", None) == "burning")
+        burning = sum(
+            1 for agent in self.model.schedule
+            if getattr(agent, "state", None) == "burning"
+        )
 
         # Alvos de poluentes conforme o número de burning
         target_co = 0.1 + burning * 2.0

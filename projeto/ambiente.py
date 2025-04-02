@@ -19,19 +19,27 @@ class EnvironmentModel(Model):
         self.grid = MultiGrid(width, height, torus=False)
         self.schedule = []
 
+        # Contador para atribuir IDs únicos a todos os agentes
+        self.agent_id_counter = 0
+
+        # Dicionário para armazenar histórico de trajetos das fragulhas
+        # Ex: { fragulha_id: [(pos1), (pos2), ...], ... }
+        self.fragulha_history = {}
+
         self.env_type = env_type
         # Vamos criar a estrada ou rio sempre no meio (você pode personalizar):
         road_y = height // 2
         river_y = height // 3
 
-        agent_id = 0
         for x in range(width):
             for y in range(height):
-                patch = PatchAgent(agent_id, self, (x, y))
-                # ---------------------------
-                # 1) Estrada + Árvores
-                # ---------------------------
+                patch = PatchAgent(self.agent_id_counter, self, (x, y))
+                self.agent_id_counter += 1
+
                 if self.env_type == "road_trees":
+                    # ---------------------------
+                    # 1) Estrada + Árvores
+                    # ---------------------------
                     if abs(y - road_y) <= 1:
                         patch.state = "road"
                         patch.pcolor = 85  # cor estrada
@@ -39,10 +47,10 @@ class EnvironmentModel(Model):
                     else:
                         self._make_forest_patch(patch, density, eucalyptus_percentage)
 
-                # ---------------------------
-                # 2) Rio + Árvores
-                # ---------------------------
                 elif self.env_type == "river_trees":
+                    # ---------------------------
+                    # 2) Rio + Árvores
+                    # ---------------------------
                     if abs(y - river_y) <= 1:
                         patch.state = "river"
                         patch.pcolor = 95  # cor rio
@@ -50,18 +58,18 @@ class EnvironmentModel(Model):
                     else:
                         self._make_forest_patch(patch, density, eucalyptus_percentage)
 
-                # ---------------------------
-                # 3) Só Árvores
-                # ---------------------------
-                else:  # "only_trees"
+                else:
+                    # ---------------------------
+                    # 3) Só Árvores
+                    # ---------------------------
                     self._make_forest_patch(patch, density, eucalyptus_percentage)
 
                 self.schedule.append(patch)
                 self.grid.place_agent(patch, (x, y))
-                agent_id += 1
 
         # Adiciona agente de ar
-        self.air_agent = AirAgent(agent_id, self)
+        self.air_agent = AirAgent(self.agent_id_counter, self)
+        self.agent_id_counter += 1
         self.schedule.append(self.air_agent)
 
         # Parâmetros de clima
@@ -89,7 +97,8 @@ class EnvironmentModel(Model):
 
     def step(self):
         """Executa um passo de simulação em todos os agentes, ajusta temperatura."""
-        for agent in self.schedule:
+        # Fazemos uma cópia da lista de agentes pois ela pode ser alterada no meio do loop (fragulhas surgindo e sendo removidas)
+        for agent in self.schedule[:]:
             agent.step()
 
         burning = sum(1 for agent in self.schedule if getattr(agent, "state", None) == "burning")
