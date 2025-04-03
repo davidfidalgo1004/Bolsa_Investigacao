@@ -18,19 +18,15 @@ class FragulhaAgent(Agent):
         self.new_pos = self.compute_target_position()
 
     def compute_target_position(self):
-        """
-        Calcula a nova posição com base na direção do vento e na sua velocidade.
-        Quanto maior a velocidade do vento, maior a distância percorrida.
-        """
         ox, oy = self.origin_pos
         angle = math.radians(self.model.wind_direction)
-        # Distância aleatória que escala com a velocidade do vento (mínimo 1 de velocidade)
         dist = random.uniform(2, 6) * max(self.model.wind_speed, 1)
-        dx = int(round(math.cos(angle) * dist))
-        dy = int(round(math.sin(angle) * dist))
+        dx = int(round(math.sin(angle) * dist))
+        dy = int(round(-math.cos(angle) * dist))
         nx = min(max(ox + dx, 0), self.model.world_width - 1)
         ny = min(max(oy + dy, 0), self.model.world_height - 1)
         return (nx, ny)
+
 
     def step(self):
         # Move-se para a new_pos
@@ -40,7 +36,10 @@ class FragulhaAgent(Agent):
 
         # Probabilidade de incendiar o patch se ele estiver florestado
         # Ajuste conforme desejar (aqui definimos 60% de chance).
-        ignition_chance = 0.60
+        alfahumidade = 0.35
+        alfaprecip = 0.35
+        alfafragulhaqueda = 0.3
+        ignition_chance = alfafragulhaqueda + (1 - self.model.rain_level) * alfaprecip + (1 / self.model.humidity) * alfahumidade
 
         # Verifica o patch onde caiu
         patches = self.model.grid.get_cell_list_contents((x, y))

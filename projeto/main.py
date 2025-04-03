@@ -4,14 +4,17 @@ import random
 from PySide6.QtWidgets import (
     QApplication, QMainWindow, QWidget, QGridLayout, QHBoxLayout, QVBoxLayout,
     QLabel, QSlider, QPushButton, QTextEdit, QGraphicsScene, QGraphicsView,
-    QDialog, QFormLayout, QLineEdit, QRadioButton, QButtonGroup
+    QDialog, QFormLayout, QRadioButton, QButtonGroup
 )
 from PySide6.QtCore import Qt, Slot, QTimer
 from PySide6.QtGui import QBrush, QColor, QGuiApplication
 
+# Importa a bússola
+from bossula import CompassWidget
+
 from ambiente import EnvironmentModel
 from MapColor import EncontrarCor
-from GraficoAnalise import GraphWindow, FragulhaArrowsWindow
+from GraficoAnalise import GraphWindow, FragulhaArrowsWindow, FireStartWindow
 
 class SimulationApp(QMainWindow):
     def __init__(self):
@@ -26,15 +29,29 @@ class SimulationApp(QMainWindow):
         self.world_height = 108
         self.forest_density = 0.5
 
-        # Modelo inicial
-        self.model = EnvironmentModel(self.world_width, self.world_height,
-                                      density=self.forest_density,
-                                      env_type="only_trees")
+        # Cria o modelo inicial
+        self.model = EnvironmentModel(
+            self.world_width,
+            self.world_height,
+            density=self.forest_density,
+            env_type="only_trees"
+        )
 
+        # Dados para os gráficos de evolução
         self.burned_area_evol = []
         self.forested_area_evol = []
         self.timesteps = []
 
+        # Contadores de iteração
+        self.current_iteration = 0
+        self.total_iterations = 0
+
+        # Lista para registrar os pontos onde o incêndio foi iniciado
+        self.fire_start_positions = []
+
+        self.has_setup = False
+
+        # Layout principal
         central_widget = QWidget()
         self.setCentralWidget(central_widget)
         self.main_layout = QGridLayout(central_widget)
@@ -43,10 +60,12 @@ class SimulationApp(QMainWindow):
 
         self.create_controls_row()
 
+        # Área de log
         self.log_text = QTextEdit()
         self.log_text.setReadOnly(True)
         self.main_layout.addWidget(self.log_text, 1, 0)
 
+        # Área para exibir a simulação (grid)
         self.graphics_scene = QGraphicsScene()
         self.graphics_view = QGraphicsView(self.graphics_scene)
         self.main_layout.addWidget(self.graphics_view, 1, 1, 2, 1)
@@ -66,6 +85,7 @@ class SimulationApp(QMainWindow):
 
         self.add_log("Interface pronta. Ajuste as configurações e clique em 'Setup'.")
 
+        # Área de parâmetros e bússola
         self.bottom_left_widget = QWidget()
         self.bottom_left_layout = QVBoxLayout(self.bottom_left_widget)
         self.bottom_left_layout.setSpacing(10)
@@ -85,6 +105,7 @@ class SimulationApp(QMainWindow):
         self.O_label = QLabel("O: --")
         self.humidity_label = QLabel("Humidade: -- %")
         self.precip_label = QLabel("Precipitação: -- %")
+
         monitors_layout.addRow("Vento (Direção):", self.wind_dir_label)
         monitors_layout.addRow("Vento (Velocidade):", self.wind_speed_label)
         monitors_layout.addRow("CO:", self.co_label)
@@ -96,13 +117,23 @@ class SimulationApp(QMainWindow):
         monitors_layout.addRow("Precipitação:", self.precip_label)
 
         self.bottom_left_layout.addWidget(self.monitors_widget)
-        self.main_layout.addWidget(self.bottom_left_widget, 2, 0)
+
+        self.compass = CompassWidget()
+        self.compass.setMinimumSize(150, 150)
+
+        bottom_h_layout = QHBoxLayout()
+        bottom_h_layout.addWidget(self.bottom_left_widget)
+        bottom_h_layout.addWidget(self.compass)
+        bottom_container = QWidget()
+        bottom_container.setLayout(bottom_h_layout)
+        self.main_layout.addWidget(bottom_container, 2, 0)
 
     def create_controls_row(self):
         controls_widget = QWidget()
         controls_layout = QVBoxLayout(controls_widget)
         controls_layout.setSpacing(5)
 
+        # Linha 1: Iterações, tipo de ambiente, Setup, Iniciar e Apagar Fogo
         row1 = QHBoxLayout()
         iter_label = QLabel("Iterações:")
         row1.addWidget(iter_label)
@@ -117,7 +148,6 @@ class SimulationApp(QMainWindow):
         self.radio_road_trees = QRadioButton("Estrada + Árvores")
         self.radio_river_trees = QRadioButton("Rio + Árvores")
         self.radio_only_trees.setChecked(True)
-
         for btn in [self.radio_only_trees, self.radio_road_trees, self.radio_river_trees]:
             self.env_type_group.addButton(btn)
             row1.addWidget(btn)
@@ -139,6 +169,7 @@ class SimulationApp(QMainWindow):
 
         controls_layout.addLayout(row1)
 
+        # Linha 2: Sliders para parâmetros climáticos e de densidade
         row2 = QHBoxLayout()
         wind_speed_label = QLabel("Vento (m/s):")
         row2.addWidget(wind_speed_label)
@@ -152,7 +183,7 @@ class SimulationApp(QMainWindow):
         row2.addWidget(wind_direction_label)
 
         self.wind_direction_slider = QSlider(Qt.Horizontal)
-        self.wind_direction_slider.setRange(1, 15)
+        self.wind_direction_slider.setRange(0, 359)
         self.wind_direction_slider.setValue(4)
         row2.addWidget(self.wind_direction_slider)
 
@@ -188,8 +219,15 @@ class SimulationApp(QMainWindow):
 
     @Slot()
     def setup_model(self):
-        self.forest_density = self.density_slider.value() / 100.0
+        # Se houver dados da simulação anterior, mostra os gráficos antes de reiniciar
+        if (self.burned_area_evol or self.forested_area_evol or self.timesteps or 
+            self.model.fragulha_history or self.fire_start_positions):
+            self.add_log("Exibindo gráficos da simulação anterior...")
+            self.show_graph_window()
 
+        self.add_log("Recriando o modelo com novas configurações...")
+
+        self.forest_density = self.density_slider.value() / 100.0
         if self.radio_road_trees.isChecked():
             chosen_env = "road_trees"
         elif self.radio_river_trees.isChecked():
@@ -197,18 +235,13 @@ class SimulationApp(QMainWindow):
         else:
             chosen_env = "only_trees"
 
-        self.add_log(f"Recriando o modelo com densidade={self.forest_density:.2f}, "
-                     f"env_type={chosen_env}, precipitação={self.precip_slider.value()}%")
-
+        # Limpa os dados da simulação anterior
         self.burned_area_evol.clear()
         self.forested_area_evol.clear()
         self.timesteps.clear()
+        self.fire_start_positions.clear()
 
-        self.model.wind_direction = self.wind_direction_slider.value()
-        self.model.wind_speed = self.wind_speed_slider.value()
-        self.model.rain_level = self.precip_slider.value() / 100.0
-        self.model.humidity = self.humid_slider.value()
-
+        # Reinicia o modelo e os contadores
         self.model = EnvironmentModel(
             self.world_width,
             self.world_height,
@@ -217,56 +250,19 @@ class SimulationApp(QMainWindow):
         )
         self.model.wind_direction = self.wind_direction_slider.value()
         self.model.wind_speed = self.wind_speed_slider.value()
-        self.model.humidity = self.humid_slider.value()
         self.model.rain_level = self.precip_slider.value() / 100.0
+        self.model.humidity = self.humid_slider.value()
 
         for row in range(self.world_height):
             for col in range(self.world_width):
                 self.cells[row][col].setBrush(QBrush(QColor("white")))
 
         self.update_grid()
-        self.add_log("Modelo recriado e dados resetados com sucesso!")
-
-    @Slot()
-    def run_simulation(self):
-        self.log_text.clear()
-        self.burned_area_evol.clear()
-        self.forested_area_evol.clear()
-        self.timesteps.clear()
-
-        self.total_iterations = self.iter_slider.value()
-        self.current_iteration = 0
-
-        self.add_log("Iniciando simulação...")
-        self.add_log(f"Executando {self.total_iterations} iterações.\n")
-
-        self.timer = QTimer()
-        self.timer.setInterval(250)
-        self.timer.timeout.connect(self.simulation_step)
-        self.timer.start()
-
-    @Slot()
-    def simulation_step(self):
-        if self.current_iteration >= self.total_iterations:
-            self.timer.stop()
-            self.add_log("\nSimulação finalizada!")
-            self.show_graph_window()
-            return
-
-        self.model.wind_direction = (self.model.wind_direction + random.uniform(-2, 2)) % 360
-        self.model.wind_speed = max(self.model.wind_speed + random.uniform(-0.3, 0.3), 0)
-
-        self.model.rain_level = self.precip_slider.value() / 100.0
-        self.model.humidity = self.humid_slider.value()
-
-        self.model.step()
-
         air_agent = self.model.air_agent
         air_status = air_agent.get_air_status()
         self.monitor_label.setText(
             f"Parâmetros: Temp: {self.model.temperature:.1f} °C, Ar: {air_status}"
         )
-
         self.fire_status_label.setText(
             f"Incêndio: {'ATIVO' if self.model.temperature > 35 or air_status == 'Perigo' else 'Inativo'} "
             f"(Temp: {self.model.temperature:.1f} °C)"
@@ -281,18 +277,86 @@ class SimulationApp(QMainWindow):
         self.humidity_label.setText(f"{self.model.humidity:.1f} %")
         self.precip_label.setText(f"{self.model.rain_level * 100:.1f} %")
 
+        self.has_setup = True
+        self.run_button.setText("Iniciar Simulação")
+        
+        # Reinicia os contadores de iteração
+        self.current_iteration = 0
+        self.total_iterations = 0
+
+    @Slot()
+    def run_simulation(self):
+        self.setup_button.setEnabled(False)
+        self.log_text.clear()
+        self.add_log("Iniciando/continuando simulação...")
+        self.run_button.setText("Continuar Simulação")
+        # Se já houver iterações executadas, soma o valor do slider; caso contrário, define o total como o valor do slider.
+        if self.current_iteration > 0:
+            self.total_iterations += self.iter_slider.value()
+        else:
+            self.total_iterations = self.iter_slider.value()
+
+        self.timer = QTimer()
+        self.timer.setInterval(250)
+        self.timer.timeout.connect(self.simulation_step)
+        self.timer.start()
+
+    @Slot()
+    def simulation_step(self):
+        if self.current_iteration >= self.total_iterations:
+            self.timer.stop()
+            self.add_log("\nSimulação finalizada!")
+            self.setup_button.setEnabled(True)
+            # Ao final da simulação, exibe automaticamente os gráficos
+            self.show_graph_window()
+            return
+
+        # Atualiza parâmetros climáticos e chama o step do modelo
+        self.model.wind_direction = (self.model.wind_direction + random.uniform(-1, 1)) % 360
+        self.model.wind_speed = max(self.model.wind_speed + random.uniform(-0.3, 0.3), 0)
+        self.model.rain_level = self.precip_slider.value() / 100.0
+        self.model.humidity = self.humid_slider.value()
+        self.model.step()
+
+        air_agent = self.model.air_agent
+        air_status = air_agent.get_air_status()
+        self.monitor_label.setText(
+            f"Parâmetros: Temp: {self.model.temperature:.1f} °C, Ar: {air_status}"
+        )
+        self.fire_status_label.setText(
+            f"Incêndio: {'ATIVO' if self.model.temperature > 35 or air_status == 'Perigo' else 'Inativo'} "
+            f"(Temp: {self.model.temperature:.1f} °C)"
+        )
+        self.wind_dir_label.setText(f"{self.model.wind_direction:.1f}°")
+        self.wind_speed_label.setText(f"{self.model.wind_speed:.1f} m/s")
+        self.co_label.setText(f"{air_agent.co_level:.2f} ppm")
+        self.co2_label.setText(f"{air_agent.co2_level:.2f} ppm")
+        self.pm25_label.setText(f"{air_agent.pm2_5_level:.2f} µg/m³")
+        self.pm10_label.setText(f"{air_agent.pm10_level:.2f} µg/m³")
+        self.O_label.setText(f"{air_agent.o2_level:.2f} ppm")
+        self.humidity_label.setText(f"{self.model.humidity:.1f} %")
+        self.precip_label.setText(f"{self.model.rain_level * 100:.1f} %")
+
+        self.compass.setAngle(self.model.wind_direction)
+
+        # Atualiza os dados de evolução
         burned = sum(1 for a in self.model.schedule if getattr(a, "state", None) == "burned")
         forested = sum(1 for a in self.model.schedule if getattr(a, "state", None) == "forested")
-
         self.burned_area_evol.append(burned)
         self.forested_area_evol.append(forested)
         self.timesteps.append(self.current_iteration)
 
         self.add_log(f"Iteração {self.current_iteration} | Queimadas: {burned}, Florestadas: {forested}")
 
+        # Chance de iniciar incêndio aleatório e registra o ponto de início
         if (self.model.temperature < 30 or air_status == "Seguro"):
             if random.random() < 0.1:
-                self.model.start_fire()
+                forested_patches = [a for a in self.model.schedule if getattr(a, "state", None) == "forested"]
+                if forested_patches:
+                    chosen = random.choice(forested_patches)
+                    chosen.state = "burning"
+                    chosen.pcolor = 15
+                    self.fire_start_positions.append(chosen.pos)
 
         self.update_grid()
         self.current_iteration += 1
@@ -311,63 +375,71 @@ class SimulationApp(QMainWindow):
                 self.cells[y][x].setBrush(QBrush(QColor(qt_color)))
 
     def show_graph_window(self):
-        """
-        Exibe janelas de gráficos ao final da simulação:
-          - Queimadas vs Florestadas
-          - Mapa de Altitude
-          - Mapa de Altura
-          - Mapa de Fragulhas (se existir alguma fragulha)
-        """
+        if not (self.burned_area_evol or self.forested_area_evol or self.timesteps or 
+                self.model.fragulha_history or self.fire_start_positions):
+            self.add_log("Sem dados para exibir gráficos.")
+            return
+
+        # Dados opcionais para gráficos de árvores
         tree_heights = [
             (agent.pos[0], agent.pos[1], agent.tree_height)
-            for agent in self.model.schedule
-            if hasattr(agent, "tree_height")
+            for agent in self.model.schedule if hasattr(agent, "tree_height")
         ]
         tree_altitudes = [
             (agent.pos[0], agent.pos[1], agent.altitude)
-            for agent in self.model.schedule
-            if hasattr(agent, "altitude")
+            for agent in self.model.schedule if hasattr(agent, "altitude")
         ]
 
-        # 1) Gráfico de evolução do incêndio
-        self.burned_forest_dialog = GraphWindow(
-            burned_data=self.burned_area_evol,
-            forested_data=self.forested_area_evol,
-            timesteps=self.timesteps,
-            parent=self
-        )
-        self.burned_forest_dialog.setWindowTitle("Evolução de Árvores Queimadas vs Florestadas")
-        self.burned_forest_dialog.show()
+        # Gráfico de evolução
+        if self.burned_area_evol or self.forested_area_evol or self.timesteps:
+            burn_dialog = GraphWindow(
+                burned_data=self.burned_area_evol,
+                forested_data=self.forested_area_evol,
+                timesteps=self.timesteps,
+                parent=self
+            )
+            burn_dialog.setWindowTitle("Evolução de Árvores Queimadas vs Florestadas")
+            burn_dialog.show()
 
-        # 2) Mapa de altitude
-        self.altitude_dialog = GraphWindow(
-            tree_altitudes=tree_altitudes,
-            parent=self
-        )
-        self.altitude_dialog.setWindowTitle("Mapa de Altitude das Árvores")
-        self.altitude_dialog.show()
+        # Gráfico de altitude, se houver
+        if tree_altitudes:
+            altitude_dialog = GraphWindow(
+                tree_altitudes=tree_altitudes,
+                parent=self
+            )
+            altitude_dialog.setWindowTitle("Mapa de Altitude das Árvores")
+            altitude_dialog.show()
 
-        # 3) Mapa de altura
-        self.height_dialog = GraphWindow(
-            tree_heights=tree_heights,
-            parent=self
-        )
-        self.height_dialog.setWindowTitle("Mapa de Altura das Árvores")
-        self.height_dialog.show()
+        # Gráfico de altura, se houver
+        if tree_heights:
+            height_dialog = GraphWindow(
+                tree_heights=tree_heights,
+                parent=self
+            )
+            height_dialog.setWindowTitle("Mapa de Altura das Árvores")
+            height_dialog.show()
 
-        # 4) Mapa de fragulhas (se houver fragulhas)
+        # Trajetórias detalhadas das fragulhas (se houver histórico)
         if self.model.fragulha_history:
-            self.fragulha_window = FragulhaArrowsWindow(
+            frag_dialog = FragulhaArrowsWindow(
                 self.model.fragulha_history,
                 self.world_width,
                 self.world_height,
                 parent=self
             )
-            self.fragulha_window.setWindowTitle("Mapa de Fragulhas (Setas)")
-            self.fragulha_window.show()
+            frag_dialog.setWindowTitle("Trajetórias Detalhadas das Fragulhas")
+            frag_dialog.show()
 
-    def add_log(self, message: str):
-        self.log_text.append(message)
+        # Gráfico dos pontos de início do incêndio
+        if self.fire_start_positions:
+            fire_dialog = FireStartWindow(
+                self.fire_start_positions,
+                self.world_width,
+                self.world_height,
+                parent=self
+            )
+            fire_dialog.setWindowTitle("Pontos de Início do Incêndio")
+            fire_dialog.show()
 
 def main():
     app = QApplication(sys.argv)
