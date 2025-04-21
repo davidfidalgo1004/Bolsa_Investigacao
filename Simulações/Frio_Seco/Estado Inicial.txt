@@ -1,0 +1,9 @@
+Estado Inicial
+Temperatura-> 3º
+Vento Direção -> Norte
+Vento Velocidade -> 2m/s
+Humidade-> 6%
+Precipitação-> 3%
+Nº Iterações -> 85
+Areas Queimadas-> 3479
+Areas Florestadas-> 3251
