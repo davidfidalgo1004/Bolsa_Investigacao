@@ -1,0 +1,7 @@
+Estado Inicial
+Temperatura-> 6º
+Vento Direção -> Norte
+Vento Velocidade -> 10m/s
+Humidade-> 32%
+Precipitação-> 42%
+Nº Iterações -> 65

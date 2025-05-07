@@ -87,7 +87,7 @@ class GraphWindow(QDialog):
 class FragulhaArrowsWindow(QDialog):
     """
     Exibe as trajetórias de fagulhas num gráfico cartesiano (xOy) tradicional,
-    transladando o ponto inicial para (0,0) e corrigindo espelhamento vertical.
+    mostrando apenas o ponto inicial (0,0) e o ponto final.
     """
     def __init__(self, fragulha_history, parent=None):
         super().__init__(parent)
@@ -108,23 +108,21 @@ class FragulhaArrowsWindow(QDialog):
             if len(path) > 1:
                 x_coords, y_coords = zip(*path)
 
-                # Ponto inicial
+                # Ponto inicial absoluto
                 x0, y0 = x_coords[0], y_coords[0]
 
                 # Translada e inverte Y para corrigir espelhamento
                 x_shifted = [x - x0 for x in x_coords]
                 y_shifted = [y0 - y for y in y_coords]
 
-                self.axes.plot(x_shifted, y_shifted, marker='o', linestyle='-', color='red', alpha=0.8)
-
-                # Destaques: início e fim
-                self.axes.plot(x_shifted[0],  y_shifted[0],  'go')  # início
+                # Apenas início e fim
+                self.axes.plot(x_shifted[0],  y_shifted[0],  'go')  # início (0,0)
                 self.axes.plot(x_shifted[-1], y_shifted[-1], 'ro')  # fim
 
-                all_x.extend(x_shifted)
-                all_y.extend(y_shifted)
+                all_x.extend([x_shifted[0], x_shifted[-1]])
+                all_y.extend([y_shifted[0], y_shifted[-1]])
 
-        # Ajusta limites
+        # Ajusta limites do gráfico
         if all_x and all_y:
             min_x, max_x = min(all_x), max(all_x)
             min_y, max_y = min(all_y), max(all_y)
@@ -136,21 +134,24 @@ class FragulhaArrowsWindow(QDialog):
 
         self.axes.set_xlabel("X")
         self.axes.set_ylabel("Y")
-        self.axes.set_title("Trajetórias das Fragulhas (cada início em (0,0))")
+        self.axes.set_title("Trajetórias das Fragulhas (início em (0,0) e fim)")
 
         self.canvas.draw()
 
 
+
 class FireStartWindow(QDialog):
     """
-    Janela que mostra os pontos onde o incêndio foi iniciado.
-    Se quiser manter a coerência com a grid, pode receber world_width e world_height.
+    Mostra os pontos onde o incêndio começou.
+    Agora com inversão do eixo X para alinhar com a grelha da simulação.
     """
     def __init__(self, fire_start_positions, world_width, world_height, parent=None):
         super().__init__(parent)
         self.setWindowTitle("Pontos de Início do Incêndio")
+
         layout = QVBoxLayout()
         self.setLayout(layout)
+
         self.fig = Figure(figsize=(5, 4), dpi=100)
         self.canvas = FigureCanvas(self.fig)
         self.axes = self.fig.add_subplot(111)
@@ -162,18 +163,21 @@ class FireStartWindow(QDialog):
                 x_coords, y_coords, color='red', marker='x', s=100,
                 label="Início do Incêndio"
             )
-            # Legenda fora do gráfico
             self.axes.legend(loc='center left', bbox_to_anchor=(1, 0.5))
 
+        # Limites originais
         self.axes.set_xlim(0, world_width)
         self.axes.set_ylim(0, world_height)
-        # Se quiser o sistema "clássico" (0,0) embaixo, não inverta Y:
-        # self.axes.invert_yaxis()
+
+        # >>> Inverte apenas o eixo X <<<
+        self.axes.invert_xaxis()
+        self.axes.invert_yaxis()
+        # Mantém Y tal como na simulação (0,0 no canto inferior-esquerdo)
+        # self.axes.invert_yaxis()  # deixe comentado se Y já estiver correto
 
         self.axes.set_xlabel("X")
         self.axes.set_ylabel("Y")
         self.axes.set_title("Pontos de Início do Incêndio")
 
-        # Ajusta layout para acomodar legendas externas
         self.fig.subplots_adjust(right=0.75)
         self.canvas.draw()

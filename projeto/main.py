@@ -242,6 +242,7 @@ class SimulationApp(QMainWindow):
 
     @Slot()
     def setup_model(self):
+        self.fireigni=True
         # Se houver dados da simulação anterior, mostra gráficos antes de reiniciar
         if (self.burned_area_evol or self.forested_area_evol or self.timesteps or
             self.model.fragulha_history or self.fire_start_positions or
@@ -283,9 +284,13 @@ class SimulationApp(QMainWindow):
         self.model.wind_direction = self.wind_direction_slider.value()
         self.model.wind_speed = self.wind_speed_slider.value()
         self.model.rain_level = self.precip_slider.value() / 100.0
-        self.model.humidity = self.humid_slider.value()
+        basehumidity = self.humid_slider.value()
         self.model.temperature = self.temp_slider.value()
 
+        if chosen_env == "river_trees":
+             self.model.humidity = basehumidity * 1.5
+        else:
+            self.model.humidity = basehumidity
         for row in range(self.world_height):
             for col in range(self.world_width):
                 self.cells[row][col].setBrush(QBrush(QColor("white")))
@@ -403,10 +408,10 @@ class SimulationApp(QMainWindow):
         self.add_log(
             f"Iteração {self.current_iteration} | Queimadas: {burned}, Florestadas: {forested}"
         )
-
         # Chance de iniciar incêndio aleatório
-        if (self.model.temperature < 30 or air_status == "Seguro"):
-            if random.random() < 0.1:
+        if (self.model.temperature < 30 or air_status != "Perigo"):
+            if random.random() < 0.05 and self.fireigni==True:
+                self.fireigni=False
                 forested_patches = [
                     a for a in self.model.schedule
                     if getattr(a, "state", None) == "forested"
@@ -416,6 +421,8 @@ class SimulationApp(QMainWindow):
                     chosen.state = "burning"
                     chosen.pcolor = 15
                     self.fire_start_positions.append(chosen.pos)
+                    
+
 
         self.update_grid()
         self.current_iteration += 1
