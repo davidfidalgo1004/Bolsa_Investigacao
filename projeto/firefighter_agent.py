@@ -14,7 +14,7 @@ class FirefighterAgent(Agent):
         self.technique = technique  # "water" ou "alternative"
         self.pcolor = 205          # mantém cor base (azul-escuro)
         self.mode = "idle"         # idle | navigating | direct_attack | firebreak | evacuated
-        self.extinguish_capacity = 3
+        self.extinguish_capacity = 2  # Reduzido de 3 para 2 para apagar mais rápido
         self.extinguish_progress: dict = {}
         self.firebreak_width = 2   # Largura inicial da linha de corte
         self.firebreak_progress = {}  # Progresso da criação da linha de corte
@@ -22,7 +22,7 @@ class FirefighterAgent(Agent):
         self.firebreak_angle = None   # Ângulo da linha de corte
         self.firebreak_center = None  # Centro da linha de corte
         self.firebreak_length = 0     # Comprimento atual da linha de corte
-        self.max_firebreak_length = 20  # Comprimento máximo da linha de corte
+        self.max_firebreak_length = 30  # Aumentado de 20 para 30 para criar linhas mais longas
         self.last_action = "init"     # Para debug
         self.danger_time = 0          # Tempo em condições perigosas
         self.min_danger_time = 5      # Tempo mínimo em condições perigosas antes de evacuar
@@ -197,7 +197,7 @@ class FirefighterAgent(Agent):
         new_pos = (x + dx, y + dy)
         
         # Verifica se a nova posição é segura
-        if not any(p.state == "burning" for p in self.model.grid.get_cell_list_contents(new_pos)):
+        if not any(hasattr(p, "state") and p.state == "burning" for p in self.model.grid.get_cell_list_contents(new_pos)):
             self.model.grid.move_agent(self, new_pos)
             self.pos = new_pos
 
