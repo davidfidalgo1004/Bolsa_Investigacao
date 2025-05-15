@@ -1,6 +1,8 @@
-from PySide6.QtWidgets import QDialog, QVBoxLayout
+from PySide6.QtWidgets import QDialog, QVBoxLayout, QGraphicsScene, QGraphicsView
 from matplotlib.figure import Figure
 from matplotlib.backends.backend_qt5agg import FigureCanvasQTAgg as FigureCanvas
+from PySide6.QtGui import QPainter, QPen, QColor, QPainterPath
+from PySide6.QtCore import Qt
 
 class GraphWindow(QDialog):
     def __init__(self, burned_data=None, forested_data=None, timesteps=None,
@@ -180,4 +182,80 @@ class FireStartWindow(QDialog):
         self.axes.set_title("Pontos de Início do Incêndio")
 
         self.fig.subplots_adjust(right=0.75)
+        self.canvas.draw()
+
+
+class FirebreakMapWindow(QDialog):
+    def __init__(self, firebreak_positions, world_width, world_height, parent=None):
+        super().__init__(parent)
+        self.setWindowTitle("Mapa de Linhas de Corte")
+
+        layout = QVBoxLayout()
+        self.setLayout(layout)
+
+        self.fig = Figure(figsize=(8, 6), dpi=100)  # Increased figure size
+        self.canvas = FigureCanvas(self.fig)
+        self.axes = self.fig.add_subplot(111)
+        layout.addWidget(self.canvas)
+
+        # Configura o tamanho do gráfico
+        self.axes.set_xlim(0, world_width)
+        self.axes.set_ylim(0, world_height)
+
+        # Desenha as linhas de corte
+        if firebreak_positions:
+            # Agrupa posições consecutivas para formar linhas
+            lines = []
+            current_line = []
+            
+            for pos in firebreak_positions:
+                if not current_line:
+                    current_line.append(pos)
+                else:
+                    last_pos = current_line[-1]
+                    # Se a posição atual é adjacente à última, adiciona à linha atual
+                    if abs(pos[0] - last_pos[0]) <= 1 and abs(pos[1] - last_pos[1]) <= 1:
+                        current_line.append(pos)
+                    else:
+                        # Se não é adjacente, finaliza a linha atual e começa uma nova
+                        if len(current_line) > 1:
+                            lines.append(current_line)
+                        current_line = [pos]
+            
+            # Adiciona a última linha se tiver mais de um ponto
+            if len(current_line) > 1:
+                lines.append(current_line)
+
+            # Desenha as linhas com estilo melhorado
+            for line in lines:
+                x_coords, y_coords = zip(*line)
+                # Linha principal mais grossa e laranja
+                self.axes.plot(x_coords, y_coords, color='orange', linewidth=3, 
+                             label='Linha de Corte' if line == lines[0] else "")
+                # Adiciona pontos nos vértices
+                self.axes.scatter(x_coords, y_coords, color='red', s=30, 
+                                label='Pontos de Corte' if line == lines[0] else "")
+
+        # Inverte os eixos para corresponder à visualização da simulação
+        self.axes.invert_xaxis()
+        self.axes.invert_yaxis()
+
+        # Configurações do gráfico
+        self.axes.set_xlabel("Posição X")
+        self.axes.set_ylabel("Posição Y")
+        self.axes.set_title("Mapa de Linhas de Corte de Fogo", pad=20, size=12)
+        
+        # Adiciona grade com estilo melhorado
+        self.axes.grid(True, linestyle='--', alpha=0.7)
+        
+        # Adiciona legenda
+        if firebreak_positions:
+            self.axes.legend(loc='upper right', bbox_to_anchor=(1.15, 1))
+
+        # Mantém a proporção dos eixos igual
+        self.axes.set_aspect("equal", adjustable="box")
+
+        # Ajusta o layout para evitar cortes
+        self.fig.tight_layout()
+
         self.canvas.draw()

@@ -1,30 +1,32 @@
+# ambiente.py
+
 from mesa import Model
 from mesa.space import MultiGrid
 import random
 from agentes import AirAgent, PatchAgent
+from firefighter_agent import FirefighterAgent   # <-- import do bombeiro
+
 
 class EnvironmentModel(Model):
-    def __init__(self, width, height, density=0.8, eucalyptus_percentage=0.5, env_type="only_trees"):
-        """
-        Parâmetros:
-          width, height: dimensões da grid
-          density: fração de patches que terão árvore (0 a 1)
-          eucalyptus_percentage: fração das árvores que serão eucaliptos
-          env_type: "road_trees", "river_trees" ou "only_trees"
-        """
+    def __init__(self, width, height, density=0.8, eucalyptus_percentage=0.5,
+                 env_type="only_trees", num_firefighters=4, water_ratio=0.5):
         super().__init__()
-        self.running = True
         self.world_width = width
         self.world_height = height
+        self.running = True
         self.grid = MultiGrid(width, height, torus=False)
         self.schedule = []
+        
 
         # Contador para IDs únicos
         self.agent_id_counter = 0
 
-        # Dicionário com histórico de trajetos das fagulhas
+        # Histórico das fagulhas
         self.fragulha_history = {}
 
+        # ------------------------------------------------------------------
+        # Cria patches (floresta / estrada / rio)
+        # ------------------------------------------------------------------
         self.env_type = env_type
         road_y = height // 2
         river_y = height // 3
@@ -35,7 +37,6 @@ class EnvironmentModel(Model):
                 self.agent_id_counter += 1
 
                 if self.env_type == "road_trees":
-                    # Estrada + Árvores
                     if abs(y - road_y) <= 1:
                         patch.state = "road"
                         patch.pcolor = 85
@@ -44,7 +45,6 @@ class EnvironmentModel(Model):
                         self._make_forest_patch(patch, density, eucalyptus_percentage)
 
                 elif self.env_type == "river_trees":
-                    # Rio + Árvores
                     if abs(y - river_y) <= 1:
                         patch.state = "river"
                         patch.pcolor = 95
@@ -52,19 +52,43 @@ class EnvironmentModel(Model):
                     else:
                         self._make_forest_patch(patch, density, eucalyptus_percentage)
 
-                else:
-                    # Só Árvores
+                else:  # only_trees
                     self._make_forest_patch(patch, density, eucalyptus_percentage)
 
                 self.schedule.append(patch)
                 self.grid.place_agent(patch, (x, y))
 
-        # Agente do ar
+        # ------------------------------------------------------------------
+        # Agente do ar + Bombeiros
+        # ------------------------------------------------------------------
+                # Agente do ar
         self.air_agent = AirAgent(self.agent_id_counter, self)
         self.agent_id_counter += 1
         self.schedule.append(self.air_agent)
 
-        # Parâmetros de clima
+        # Bombeiros inseridos dinamicamente conforme sliders:
+        border_positions = []
+        # coleta todas as posições na borda do grid (células seguras nas extremidades)
+        for x in range(self.world_width):
+            border_positions.append((x, 0))
+            border_positions.append((x, self.world_height - 1))
+        for y in range(1, self.world_height - 1):
+            border_positions.append((0, y))
+            border_positions.append((self.world_width - 1, y))
+        random.shuffle(border_positions)
+        selected_positions = border_positions[:num_firefighters]
+        water_count = int(num_firefighters * water_ratio)
+        for idx, (fx, fy) in enumerate(selected_positions):
+            # Define técnica conforme proporção (jato de água ou alternativa)
+            technique = "water" if idx < water_count else "alternative"
+            firefighter = FirefighterAgent(self.agent_id_counter, self, (fx, fy), technique=technique)
+            self.agent_id_counter += 1
+            self.schedule.append(firefighter)
+            self.grid.place_agent(firefighter, (fx, fy))
+
+        # ------------------------------------------------------------------
+        # Parâmetros ambientais
+        # ------------------------------------------------------------------
         self.temperature = 25.0
         self.wind_direction = 0
         self.wind_speed = 2
@@ -73,7 +97,6 @@ class EnvironmentModel(Model):
         self.itsrain_ = False
 
     def _make_forest_patch(self, patch, density, eucalyptus_percentage):
-        """Define se o patch será vazio ou terá árvore."""
         if random.random() > density:
             patch.state = "empty"
             patch.pcolor = 0
@@ -83,34 +106,33 @@ class EnvironmentModel(Model):
             patch.state = "forested"
             if random.random() < eucalyptus_percentage:
                 patch.tree_type = "eucalyptus"
-                patch.pcolor = 75  # eucalipto
+                patch.pcolor = 75
                 patch.factor_type_tree = 0.8
             else:
                 patch.tree_type = "pine"
-                patch.pcolor = 55  # pinheiro
+                patch.pcolor = 55
                 patch.factor_type_tree = 0.5
 
     def step(self):
-        # Executa step em todos os agentes
         for agent in self.schedule[:]:
             agent.step()
 
-        # Ajusta temperatura com base em quantos estão queimando
-        burning = sum(1 for agent in self.schedule if getattr(agent, "state", None) == "burning")
+        burning = sum(
+            1 for a in self.schedule if getattr(a, "state", None) == "burning"
+        )
         target_temp = 25.0 + burning * 0.5
-        decay = 0.1
-        self.temperature += (target_temp - self.temperature) * decay
+        self.temperature += (target_temp - self.temperature) * 0.1
 
     def start_fire(self):
-        """Inicia fogo num patch florestado aleatório."""
-        forested_patches = [a for a in self.schedule if getattr(a, "state", None) == "forested"]
-        if forested_patches:
-            chosen = random.choice(forested_patches)
+        forested = [
+            a for a in self.schedule if getattr(a, "state", None) == "forested"
+        ]
+        if forested:
+            chosen = random.choice(forested)
             chosen.state = "burning"
             chosen.pcolor = 15
 
     def stop_fire(self):
-        """Para o fogo manualmente (todos os burning ficam burned)."""
         for agent in self.schedule:
             if getattr(agent, "state", None) == "burning":
                 agent.state = "burned"

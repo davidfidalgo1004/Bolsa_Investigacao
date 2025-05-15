@@ -121,6 +121,9 @@ class PatchAgent(Agent):
                 self.dangered_time = 0
             return
 
+        if self.state == "firebreak":
+            self.pcolor = 35  # cor marrom/cinza
+
         if self.state == "burning":
             if self.burn_time is None:
                 # Define tempo de queima baseado no tipo
@@ -253,11 +256,11 @@ class AirAgent(Agent):
     def get_air_status(self):
         """Retorna 'Perigo' se a qualidade do ar estiver ruim; caso contrário, 'Seguro'."""
         if (
-            self.o2_level <= 20000
-            or self.co_level >= 10
-            or self.co2_level >= 1000
-            or self.pm10_level >= 100
-            or self.pm2_5_level >= 100
+            self.o2_level <= 15000
+            or self.co_level >= 20
+            or self.co2_level >= 2000
+            or self.pm10_level >= 200
+            or self.pm2_5_level >= 200
         ):
             return "Perigo"
         return "Seguro"

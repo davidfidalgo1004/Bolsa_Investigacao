@@ -7,14 +7,15 @@ from PySide6.QtWidgets import (
     QDialog, QFormLayout, QRadioButton, QButtonGroup
 )
 from PySide6.QtCore import Qt, Slot, QTimer
-from PySide6.QtGui import QBrush, QColor, QGuiApplication
+from PySide6.QtGui import QBrush, QColor, QGuiApplication, QPixmap
 
-# Importa a bússola
 from bossula import CompassWidget
 
 from ambiente import EnvironmentModel
+from firefighter_agent import FirefighterAgent
 from MapColor import EncontrarCor
-from GraficoAnalise import GraphWindow, FragulhaArrowsWindow, FireStartWindow
+from GraficoAnalise import GraphWindow, FragulhaArrowsWindow, FireStartWindow, FirebreakMapWindow
+
 
 class SimulationApp(QMainWindow):
     def __init__(self):
@@ -41,7 +42,7 @@ class SimulationApp(QMainWindow):
         self.burned_area_evol = []
         self.forested_area_evol = []
         self.timesteps = []
-
+        self.siren_items = []
         # Dados para o gráfico do ar
         self.air_co_evol = []
         self.air_co2_evol = []
@@ -81,6 +82,38 @@ class SimulationApp(QMainWindow):
         self.main_layout.addWidget(self.graphics_view, 1, 1, 2, 1)
 
         self.cell_size = 5
+
+        # Carrega ícone da sirene (80% da célula) ou fallback azul-escuro
+        try:
+            self.siren_icon = QPixmap("siren.jpg").scaled(
+                int(self.cell_size * 0.8),
+                int(self.cell_size * 0.8),
+                Qt.KeepAspectRatio,
+                Qt.SmoothTransformation
+            )
+        except Exception:
+            self.siren_icon = QPixmap(self.cell_size, self.cell_size)
+            self.siren_icon.fill(QColor("#00008B"))
+        self.siren_items = []
+
+        try:
+            self.tech_icon = QPixmap("bombeirotec.jpg").scaled(
+                int(self.cell_size * 0.8),
+                int(self.cell_size * 0.8),
+                Qt.KeepAspectRatio,
+                Qt.SmoothTransformation
+            )
+        except Exception:
+            # fallback para caso não encontre o arquivo
+            self.siren_icon = QPixmap(self.cell_size, self.cell_size)
+            self.siren_icon.fill(QColor("#00008B"))
+         # Painel inferior (cria o widget e o layout antes de usar)
+        self.bottom_left_widget = QWidget()
+        self.bottom_left_layout = QVBoxLayout(self.bottom_left_widget)
+        self.bottom_left_layout.setSpacing(10)
+        # status dos bombeiros
+        self.ff_status_label = QLabel("Bombeiros – Ataque: 0, Movendo: 0, Ociosos: 4")
+        self.bottom_left_layout.addWidget(self.ff_status_label)
         self.cells = []
         for row in range(self.world_height):
             row_items = []
@@ -94,12 +127,6 @@ class SimulationApp(QMainWindow):
             self.cells.append(row_items)
 
         self.add_log("Interface pronta. Ajuste as configurações e clique em 'Setup'.")
-
-        # Painel inferior
-        self.bottom_left_widget = QWidget()
-        self.bottom_left_layout = QVBoxLayout(self.bottom_left_widget)
-        self.bottom_left_layout.setSpacing(10)
-
         self.monitor_label = QLabel("Parâmetros: Temp: -- °C, Ar: --")
         self.bottom_left_layout.addWidget(self.monitor_label)
 
@@ -235,6 +262,25 @@ class SimulationApp(QMainWindow):
         controls_layout.addLayout(row2)
         self.main_layout.addWidget(controls_widget, 0, 0, 1, 2)
 
+        row3 = QHBoxLayout()
+        # Slider para número total de bombeiros
+        ff_count_label = QLabel("Número de Bombeiros:")
+        row3.addWidget(ff_count_label)
+        self.ff_count_slider = QSlider(Qt.Horizontal)
+        self.ff_count_slider.setRange(4, 120)
+        self.ff_count_slider.setValue(4)  # valor inicial padrão
+        row3.addWidget(self.ff_count_slider)
+        # Slider para proporção de jatos de água
+        ff_ratio_label = QLabel("Tecnicistas | Apagadores")
+        row3.addWidget(ff_ratio_label)
+        self.ff_ratio_slider = QSlider(Qt.Horizontal)
+        self.ff_ratio_slider.setRange(0, 100)
+        self.ff_ratio_slider.setValue(50)  # valor inicial 50%
+        row3.addWidget(self.ff_ratio_slider)
+
+        # Adiciona a nova linha de controles ao layout principal de controles
+        controls_layout.addLayout(row3)
+
 
     def add_log(self, message: str):
         self.log_text.append(message)
@@ -279,8 +325,11 @@ class SimulationApp(QMainWindow):
             self.world_width,
             self.world_height,
             density=self.forest_density,
-            env_type=chosen_env
+            env_type=chosen_env,
+            num_firefighters=self.ff_count_slider.value(),
+            water_ratio=self.ff_ratio_slider.value() / 100.0
         )
+
         self.model.wind_direction = self.wind_direction_slider.value()
         self.model.wind_speed = self.wind_speed_slider.value()
         self.model.rain_level = self.precip_slider.value() / 100.0
@@ -421,8 +470,16 @@ class SimulationApp(QMainWindow):
                     chosen.state = "burning"
                     chosen.pcolor = 15
                     self.fire_start_positions.append(chosen.pos)
-                    
-
+        
+        # Contagem de estados dos bombeiros
+        firefighters = [a for a in self.model.schedule if isinstance(a, FirefighterAgent)]
+        ativos = sum(1 for f in firefighters if f.mode != "evacuated")
+        em_ataque = sum(1 for f in firefighters if f.mode == "direct_attack")
+        evacuados = sum(1 for f in firefighters if f.mode == "evacuated")
+        # Atualiza rótulo de status dos bombeiros
+        self.ff_status_label.setText(
+            f"Bombeiros – Ativos: {ativos}, Em ataque: {em_ataque}, Evacuados: {evacuados}"
+        )
 
         self.update_grid()
         self.current_iteration += 1
@@ -434,14 +491,38 @@ class SimulationApp(QMainWindow):
         self.add_log("Fogo apagado manualmente!")
 
 
+    
     def update_grid(self):
+        # Remove ícones antigos
+        for item in getattr(self, "siren_items", []):
+            self.graphics_scene.removeItem(item)
+        self.siren_items = []
+
+        icon_offset = int(self.cell_size * 0.1)  # margem para canto
         for agent in self.model.schedule:
             if hasattr(agent, "pos") and hasattr(agent, "pcolor"):
                 x, y = agent.pos
-                color_value = agent.pcolor
-                qt_color = EncontrarCor(color_value)
-                self.cells[y][x].setBrush(QBrush(QColor(qt_color)))
+                # Pinta a célula conforme pcolor
+                qt_color = QColor(EncontrarCor(agent.pcolor))
+                # Se for firebreak, pode forçar uma cor específica
+                if getattr(agent, "state", None) == "firebreak":
+                    qt_color = QColor("#8B4513")  # marrom, por exemplo
+                self.cells[y][x].setBrush(QBrush(qt_color))
 
+                # Sobrepõe ícone se for bombeiro
+                if isinstance(agent, FirefighterAgent):
+                    # Escolhe ícone conforme técnica do bombeiro
+                    if getattr(agent, "technique", "water") == "alternative":
+                        pixmap = self.tech_icon
+                    else:
+                        pixmap = self.siren_icon
+
+                    pixmap_item = self.graphics_scene.addPixmap(pixmap)
+                    pixmap_item.setPos(
+                        x * self.cell_size + icon_offset,
+                        y * self.cell_size + icon_offset
+                    )
+                    self.siren_items.append(pixmap_item)
 
     def show_graph_window(self):
         # Se não houver dados, sai
@@ -535,6 +616,17 @@ class SimulationApp(QMainWindow):
             )
             fire_dialog.setWindowTitle("Pontos de Início do Incêndio")
             fire_dialog.show()
+
+        # 8) Mapa de linhas de corte
+        if hasattr(self.model, 'firebreak_history') and self.model.firebreak_history:
+            firebreak_dialog = FirebreakMapWindow(
+                self.model.firebreak_history,
+                self.world_width,
+                self.world_height,
+                parent=self
+            )
+            firebreak_dialog.setWindowTitle("Mapa de Linhas de Corte")
+            firebreak_dialog.show()
 
 
 def main():
