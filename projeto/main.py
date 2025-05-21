@@ -4,17 +4,36 @@ import random
 from PySide6.QtWidgets import (
     QApplication, QMainWindow, QWidget, QGridLayout, QHBoxLayout, QVBoxLayout,
     QLabel, QSlider, QPushButton, QTextEdit, QGraphicsScene, QGraphicsView,
-    QDialog, QFormLayout, QRadioButton, QButtonGroup
-)
-from PySide6.QtCore import Qt, Slot, QTimer
-from PySide6.QtGui import QBrush, QColor, QGuiApplication, QPixmap
-
+    QFormLayout, QRadioButton, QButtonGroup, QToolTip)
+from PySide6.QtCore import Qt, Slot, QTimer, QEvent
+from PySide6.QtGui import QBrush, QColor, QGuiApplication, QPixmap, QCursor
 from bossula import CompassWidget
 
 from ambiente import EnvironmentModel
 from firefighter_agent import FirefighterAgent
 from MapColor import EncontrarCor
-from GraficoAnalise import GraphWindow, FragulhaArrowsWindow, FireStartWindow, FirebreakMapWindow
+from GraficoAnalise import GraphWindow, FragulhaArrowsWindow, FireStartWindow, FirebreakMapWindow, plot_response_heatmap, plot_trajectories
+
+class HoverValueSlider(QSlider):
+    """
+    QSlider que exibe, em tempo-real, o valor na posição do cursor.
+    """
+    def __init__(self, orientation, parent=None):
+        super().__init__(orientation, parent)
+        self.setMouseTracking(True)       # recebe eventos de movimento mesmo sem botão
+        self.installEventFilter(self)     # intercepta eventos para mostrar tooltip
+
+    # ---------- evento genérico ----------
+    def eventFilter(self, obj, event):
+        if event.type() in (QEvent.MouseMove, QEvent.Enter):
+            # actualiza o texto da tooltip e mostra onde está o cursor
+            QToolTip.showText(QCursor.pos(), str(self.value()), self)
+        return super().eventFilter(obj, event)
+
+    # opcional: garante que a tooltip desaparece ao sair
+    def leaveEvent(self, event):
+        QToolTip.hideText()
+        super().leaveEvent(event)
 
 
 class SimulationApp(QMainWindow):
@@ -178,7 +197,7 @@ class SimulationApp(QMainWindow):
         iter_label = QLabel("Iterações:")
         row1.addWidget(iter_label)
 
-        self.iter_slider = QSlider(Qt.Horizontal)
+        self.iter_slider = HoverValueSlider(Qt.Horizontal)
         self.iter_slider.setRange(10, 500)
         self.iter_slider.setValue(100)
         row1.addWidget(self.iter_slider)
@@ -214,7 +233,7 @@ class SimulationApp(QMainWindow):
         wind_speed_label = QLabel("Vento (m/s):")
         row2.addWidget(wind_speed_label)
 
-        self.wind_speed_slider = QSlider(Qt.Horizontal)
+        self.wind_speed_slider = HoverValueSlider(Qt.Horizontal)
         self.wind_speed_slider.setRange(1, 15)
         self.wind_speed_slider.setValue(4)
         row2.addWidget(self.wind_speed_slider)
@@ -222,7 +241,7 @@ class SimulationApp(QMainWindow):
         wind_direction_label = QLabel("Direção Vento (º):")
         row2.addWidget(wind_direction_label)
 
-        self.wind_direction_slider = QSlider(Qt.Horizontal)
+        self.wind_direction_slider = HoverValueSlider(Qt.Horizontal)
         self.wind_direction_slider.setRange(0, 359)
         self.wind_direction_slider.setValue(4)
         row2.addWidget(self.wind_direction_slider)
@@ -230,7 +249,7 @@ class SimulationApp(QMainWindow):
         density_label = QLabel("Densidade Florestal:")
         row2.addWidget(density_label)
 
-        self.density_slider = QSlider(Qt.Horizontal)
+        self.density_slider = HoverValueSlider(Qt.Horizontal)
         self.density_slider.setRange(0, 100)
         self.density_slider.setValue(int(self.forest_density * 100))
         row2.addWidget(self.density_slider)
@@ -238,7 +257,7 @@ class SimulationApp(QMainWindow):
         precip_label = QLabel("Precipitação (%):")
         row2.addWidget(precip_label)
 
-        self.precip_slider = QSlider(Qt.Horizontal)
+        self.precip_slider = HoverValueSlider(Qt.Horizontal)
         self.precip_slider.setRange(0, 100)
         self.precip_slider.setValue(50)
         row2.addWidget(self.precip_slider)
@@ -246,7 +265,7 @@ class SimulationApp(QMainWindow):
         humid_label = QLabel("Humidade (%):")
         row2.addWidget(humid_label)
 
-        self.humid_slider = QSlider(Qt.Horizontal)
+        self.humid_slider = HoverValueSlider(Qt.Horizontal)
         self.humid_slider.setRange(1, 100)
         self.humid_slider.setValue(15)
         row2.addWidget(self.humid_slider)
@@ -254,7 +273,7 @@ class SimulationApp(QMainWindow):
         temp_label = QLabel("Temperatura (°C):")
         row2.addWidget(temp_label)
 
-        self.temp_slider = QSlider(Qt.Horizontal)
+        self.temp_slider = HoverValueSlider(Qt.Horizontal)
         self.temp_slider.setRange(0, 30)
         self.temp_slider.setValue(25)
         row2.addWidget(self.temp_slider)
@@ -266,14 +285,14 @@ class SimulationApp(QMainWindow):
         # Slider para número total de bombeiros
         ff_count_label = QLabel("Número de Bombeiros:")
         row3.addWidget(ff_count_label)
-        self.ff_count_slider = QSlider(Qt.Horizontal)
+        self.ff_count_slider = HoverValueSlider(Qt.Horizontal)
         self.ff_count_slider.setRange(4, 120)
         self.ff_count_slider.setValue(4)  # valor inicial padrão
         row3.addWidget(self.ff_count_slider)
         # Slider para proporção de jatos de água
-        ff_ratio_label = QLabel("Tecnicistas | Apagadores")
+        ff_ratio_label = QLabel("Tecnicistas | Apagadores (%)")
         row3.addWidget(ff_ratio_label)
-        self.ff_ratio_slider = QSlider(Qt.Horizontal)
+        self.ff_ratio_slider = HoverValueSlider(Qt.Horizontal)
         self.ff_ratio_slider.setRange(0, 100)
         self.ff_ratio_slider.setValue(50)  # valor inicial 50%
         row3.addWidget(self.ff_ratio_slider)
@@ -295,6 +314,8 @@ class SimulationApp(QMainWindow):
             self.air_co_evol or self.temp_evol):
             self.add_log("Exibindo gráficos da simulação anterior...")
             self.show_graph_window()
+            plot_response_heatmap(self.model, self.world_width, self.world_height)
+            plot_trajectories(self.model)
 
         self.add_log("Recriando o modelo com novas configurações...")
 
@@ -405,6 +426,7 @@ class SimulationApp(QMainWindow):
             else:
                 self.model.itsrain_ = False
         # Atualiza parâmetros a cada iteração
+        self.model.current_iteration = self.current_iteration
         self.model.wind_direction = (self.model.wind_direction + random.uniform(-1, 1)) % 360
         self.model.wind_speed = max(self.model.wind_speed + random.uniform(-0.3, 0.3), 0)
         self.model.rain_level = self.precip_slider.value() / 100.0

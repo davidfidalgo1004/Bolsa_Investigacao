@@ -3,6 +3,51 @@ from matplotlib.figure import Figure
 from matplotlib.backends.backend_qt5agg import FigureCanvasQTAgg as FigureCanvas
 from PySide6.QtGui import QPainter, QPen, QColor, QPainterPath
 from PySide6.QtCore import Qt
+import numpy as np
+import matplotlib.pyplot as plt
+
+def plot_response_heatmap(model, W, H):
+    mat = np.full((H, W), np.nan)
+    for (x,y), t in model.response_time.items():
+        mat[H-1-y, x] = t        # inverte eixo Y p/ coincidir com grid
+    plt.figure(figsize=(6,5))
+    im = plt.imshow(mat, origin='upper')
+    plt.title("Tempo de resposta (iterações)")
+    plt.colorbar(im)
+    plt.show()
+
+def plot_trajectories(model):
+    import matplotlib.pyplot as plt
+
+    plt.figure(figsize=(6, 6))
+
+    for ag in model.schedule:
+        if hasattr(ag, "history"):
+            xs, ys = zip(*ag.history)
+
+            # escolha de cor: técnicos (“alternative”) laranja, água azul-escuro
+            if getattr(ag, "technique", "water") == "alternative":
+                cor = "orange"
+            else:
+                cor = "navy"
+
+            plt.plot(xs, ys,
+                     color=cor,
+                     linewidth=.9,
+                     marker='o', markersize=1.8,
+                     label=("Técnico" if cor == "orange" else "Apagadores"))
+
+    plt.gca().set_aspect("equal", "box")
+    plt.title("Trajectórias dos Bombeiros")
+    plt.xlabel("X"); plt.ylabel("Y")
+
+    # evitar legendas duplicadas
+    handles, labels = plt.gca().get_legend_handles_labels()
+    by_label = dict(zip(labels, handles))
+    plt.legend(by_label.values(), by_label.keys(), loc="upper right")
+
+    plt.show()
+
 
 class GraphWindow(QDialog):
     def __init__(self, burned_data=None, forested_data=None, timesteps=None,
@@ -197,7 +242,7 @@ class FirebreakMapWindow(QDialog):
         self.canvas = FigureCanvas(self.fig)
         self.axes = self.fig.add_subplot(111)
         layout.addWidget(self.canvas)
-
+        self.axes.invert_yaxis()
         # Configura o tamanho do gráfico
         self.axes.set_xlim(0, world_width)
         self.axes.set_ylim(0, world_height)
@@ -235,10 +280,6 @@ class FirebreakMapWindow(QDialog):
                 # Adiciona pontos nos vértices
                 self.axes.scatter(x_coords, y_coords, color='red', s=30, 
                                 label='Pontos de Corte' if line == lines[0] else "")
-
-        # Inverte os eixos para corresponder à visualização da simulação
-        self.axes.invert_xaxis()
-        self.axes.invert_yaxis()
 
         # Configurações do gráfico
         self.axes.set_xlabel("Posição X")

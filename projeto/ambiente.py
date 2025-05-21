@@ -16,6 +16,8 @@ class EnvironmentModel(Model):
         self.running = True
         self.grid = MultiGrid(width, height, torus=False)
         self.schedule = []
+        self.response_time = {}    
+        self.fire_start_iter = {}  
         
 
         # Contador para IDs únicos
@@ -131,6 +133,8 @@ class EnvironmentModel(Model):
             chosen = random.choice(forested)
             chosen.state = "burning"
             chosen.pcolor = 15
+            if chosen.pos not in self.fire_start_iter:
+                self.fire_start_iter[chosen.pos] = self.current_iteration
 
     def stop_fire(self):
         for agent in self.schedule:

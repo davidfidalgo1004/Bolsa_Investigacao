@@ -26,12 +26,13 @@ class FirefighterAgent(Agent):
         self.last_action = "init"     # Para debug
         self.danger_time = 0          # Tempo em condições perigosas
         self.min_danger_time = 5      # Tempo mínimo em condições perigosas antes de evacuar
+        self.history = [pos] 
 
     def step(self):
         # Debug: Imprime o estado atual do bombeiro
         if self.technique == "alternative":
             print(f"Bombeiro Técnico {self.unique_id}: Modo={self.mode}, Pos={self.pos}, Última ação={self.last_action}")
-
+        self.history.append(self.pos)
         # 1) Se estiver sobre fogo, "morre" (remove-se do grid e do scheduler)
         patches = self.model.grid.get_cell_list_contents(self.pos)
         for patch in patches:
@@ -202,18 +203,19 @@ class FirefighterAgent(Agent):
             self.pos = new_pos
 
     def set_firebreak(self, pos):
-        """Cria um firebreak em uma posição específica"""
+        """Cria ou reforça um firebreak e regista a posição."""
+        # 1) Marca o patch como firebreak (se ainda não estiver)
         for patch in self.model.grid.get_cell_list_contents(pos):
-            if hasattr(patch, "state") and patch.state == "forested":
+            if getattr(patch, "state", None) != "firebreak":
                 patch.state = "firebreak"
-                patch.pcolor = 25  # cor laranja para firebreak
-                # Adiciona a posição ao histórico de firebreaks
-                if not hasattr(self.model, 'firebreak_history'):
-                    self.model.firebreak_history = []
-                self.model.firebreak_history.append(pos)
-                # Reduz a chance de falha para 2%
-                if random.random() < 0.02:
-                    patch.state = "forested"  # Volta ao estado original
+                patch.pcolor = 25  # laranja
+
+        # 2) Regista a posição (sem duplicados)
+        if not hasattr(self.model, "firebreak_history"):
+            self.model.firebreak_history = []
+
+        if pos not in self.model.firebreak_history:
+            self.model.firebreak_history.append(pos)
 
     def _try_extinguish_neighbors(self) -> bool:
         """Tenta apagar fogo nas células adjacentes (raio 1)."""
@@ -236,17 +238,45 @@ class FirefighterAgent(Agent):
                         patch.burn_time = None
                         self.extinguish_progress.pop(key, None)
                         extinguished = True
+                        if key not in self.model.response_time:
+                            t0 = self.model.fire_start_iter.get(key, self.model.current_iteration)
+                            self.model.response_time[key] = self.model.current_iteration - t0
         return extinguished
 
     def _move_towards_priority_fire(self, fires):
-        """Desloca-se um passo na direção do incêndio mais próximo."""
-        target_pos = min(fires, key=lambda f: math.dist(self.pos, f.pos)).pos
+        """
+        Aproxima-se do foco mais próximo **pelo lado oposto ao vento** (up-wind).
+        Se já estiver do lado ideal, vai directo; caso contrário contorna gradualmente.
+        """
+        fire = min(fires, key=lambda f: math.dist(self.pos, f.pos))
+        fx, fy = fire.pos
 
+        # vector do vento (para onde o vento sopra)
+        rad = math.radians(self.model.wind_direction)
+        wind_dx = round(math.sin(rad))
+        wind_dy = -round(math.cos(rad))
+
+        # ponto “rendez-vous” a algumas células up-wind
+        SAFE_DIST = 3
+        upwind_target = (
+            max(0, min(self.model.world_width  - 1, fx - wind_dx * SAFE_DIST)),
+            max(0, min(self.model.world_height - 1, fy - wind_dy * SAFE_DIST)),
+        )
+
+        # escolhe o ponto que me deixa mais perto do lado correcto
+        if math.dist(self.pos, upwind_target) < math.dist(self.pos, (fx, fy)):
+            tx, ty = upwind_target
+        else:
+            tx, ty = fx, fy
+
+        # movimento de 1 célula evitando entrar em fogo
         x, y = self.pos
-        tx, ty = target_pos
         dx = 1 if tx > x else -1 if tx < x else 0
         dy = 1 if ty > y else -1 if ty < y else 0
         new_pos = (x + dx, y + dy)
 
-        self.model.grid.move_agent(self, new_pos)
-        self.pos = new_pos
+        # só avança se a célula destino não estiver a arder
+        if not any(getattr(p, "state", None) == "burning"
+                for p in self.model.grid.get_cell_list_contents(new_pos)):
+            self.model.grid.move_agent(self, new_pos)
+            self.pos = new_pos
