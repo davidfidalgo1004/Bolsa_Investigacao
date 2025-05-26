@@ -7,45 +7,46 @@ import numpy as np
 import matplotlib.pyplot as plt
 
 def plot_response_heatmap(model, W, H):
+    """Desenha um heat‑map com o tempo de resposta (em iterações) de cada célula.
+    Células não‑atingidas aparecem a branco (NaN)."""
     mat = np.full((H, W), np.nan)
-    for (x,y), t in model.response_time.items():
-        mat[H-1-y, x] = t        # inverte eixo Y p/ coincidir com grid
-    plt.figure(figsize=(6,5))
-    im = plt.imshow(mat, origin='upper')
+    for (x, y), t in model.response_time.items():
+        mat[H - 1 - y, x] = t  # inverte Y para ficar como a grelha
+
+    plt.figure(figsize=(6, 5))
+    # máscara para ignorar os NaN na escala de cor
+    im = plt.imshow(mat, origin="upper", cmap="plasma")
     plt.title("Tempo de resposta (iterações)")
-    plt.colorbar(im)
+    plt.colorbar(im, label="Iterações até extinção")
+    plt.xlabel("X")
+    plt.ylabel("Y")
+    plt.tight_layout()
     plt.show()
 
-def plot_trajectories(model):
-    import matplotlib.pyplot as plt
 
+def plot_trajectories(model):
+    """Desenha as trajectórias percorridas por todos os bombeiros."""
     plt.figure(figsize=(6, 6))
 
     for ag in model.schedule:
         if hasattr(ag, "history"):
             xs, ys = zip(*ag.history)
 
-            # escolha de cor: técnicos (“alternative”) laranja, água azul-escuro
-            if getattr(ag, "technique", "water") == "alternative":
-                cor = "orange"
-            else:
-                cor = "navy"
+            # bombeiros "alternative" em laranja; os de água em azul‑escuro
+            cor = "orange" if getattr(ag, "technique", "water") == "alternative" else "navy"
+            lbl = "Técnico" if cor == "orange" else "Apagadores"
 
-            plt.plot(xs, ys,
-                     color=cor,
-                     linewidth=.9,
-                     marker='o', markersize=1.8,
-                     label=("Técnico" if cor == "orange" else "Apagadores"))
+            plt.plot(xs, ys, color=cor, linewidth=.9, marker="o", markersize=1.8, label=lbl)
 
     plt.gca().set_aspect("equal", "box")
-    plt.title("Trajectórias dos Bombeiros")
-    plt.xlabel("X"); plt.ylabel("Y")
-
-    # evitar legendas duplicadas
+    # evita legendas duplicadas
     handles, labels = plt.gca().get_legend_handles_labels()
-    by_label = dict(zip(labels, handles))
-    plt.legend(by_label.values(), by_label.keys(), loc="upper right")
-
+    by_lbl = dict(zip(labels, handles))
+    plt.legend(by_lbl.values(), by_lbl.keys(), loc="upper right")
+    plt.title("Trajectórias dos Bombeiros")
+    plt.xlabel("X")
+    plt.ylabel("Y")
+    plt.tight_layout()
     plt.show()
 
 
@@ -231,72 +232,54 @@ class FireStartWindow(QDialog):
 
 
 class FirebreakMapWindow(QDialog):
+    """Exibe todas as linhas de corte desenhadas durante a simulação.
+
+    A versão anterior agrupava posições apenas na ordem em que eram registadas –
+    se os pontos chegavam desordenados, muitas linhas ficavam com tamanho 1 e
+    eram descartadas.  Agora usamos uma busca em largura (BFS) para encontrar
+    *todos* os componentes conectados (vizinhança de Moore) garantindo que cada
+    segmento aparece, mesmo os de um único patch."""
+
     def __init__(self, firebreak_positions, world_width, world_height, parent=None):
         super().__init__(parent)
         self.setWindowTitle("Mapa de Linhas de Corte")
+        layout = QVBoxLayout(); self.setLayout(layout)
+        self.fig = Figure(figsize=(8, 6), dpi=100)
+        self.canvas = FigureCanvas(self.fig); layout.addWidget(self.canvas)
+        ax = self.fig.add_subplot(111)
+        ax.invert_yaxis()
+        ax.set_xlim(0, world_width); ax.set_ylim(0, world_height)
 
-        layout = QVBoxLayout()
-        self.setLayout(layout)
-
-        self.fig = Figure(figsize=(8, 6), dpi=100)  # Increased figure size
-        self.canvas = FigureCanvas(self.fig)
-        self.axes = self.fig.add_subplot(111)
-        layout.addWidget(self.canvas)
-        self.axes.invert_yaxis()
-        # Configura o tamanho do gráfico
-        self.axes.set_xlim(0, world_width)
-        self.axes.set_ylim(0, world_height)
-
-        # Desenha as linhas de corte
         if firebreak_positions:
-            # Agrupa posições consecutivas para formar linhas
-            lines = []
-            current_line = []
-            
-            for pos in firebreak_positions:
-                if not current_line:
-                    current_line.append(pos)
-                else:
-                    last_pos = current_line[-1]
-                    # Se a posição atual é adjacente à última, adiciona à linha atual
-                    if abs(pos[0] - last_pos[0]) <= 1 and abs(pos[1] - last_pos[1]) <= 1:
-                        current_line.append(pos)
-                    else:
-                        # Se não é adjacente, finaliza a linha atual e começa uma nova
-                        if len(current_line) > 1:
-                            lines.append(current_line)
-                        current_line = [pos]
-            
-            # Adiciona a última linha se tiver mais de um ponto
-            if len(current_line) > 1:
-                lines.append(current_line)
+            # ---------- agrupa posições conectadas ----------
+            pos_set = set(firebreak_positions)
+            visited = set(); lines = []
+            for pos in pos_set:
+                if pos in visited:
+                    continue
+                queue = [pos]; visited.add(pos); comp = []
+                while queue:
+                    x, y = queue.pop()
+                    comp.append((x, y))
+                    # vizinhança de Moore (8‑ligação)
+                    for nx in range(x - 1, x + 2):
+                        for ny in range(y - 1, y + 2):
+                            if (nx, ny) in pos_set and (nx, ny) not in visited:
+                                visited.add((nx, ny)); queue.append((nx, ny))
+                lines.append(comp)
 
-            # Desenha as linhas com estilo melhorado
-            for line in lines:
-                x_coords, y_coords = zip(*line)
-                # Linha principal mais grossa e laranja
-                self.axes.plot(x_coords, y_coords, color='orange', linewidth=3, 
-                             label='Linha de Corte' if line == lines[0] else "")
-                # Adiciona pontos nos vértices
-                self.axes.scatter(x_coords, y_coords, color='red', s=30, 
-                                label='Pontos de Corte' if line == lines[0] else "")
+            # ---------- desenha cada componente ----------
+            for idx, line in enumerate(lines):
+                xs, ys = zip(*line)
+                ax.plot(xs, ys, color="orange", linewidth=3,
+                        label="Linha de Corte" if idx == 0 else "")
+                ax.scatter(xs, ys, color="red", s=30,
+                           label="Pontos de Corte" if idx == 0 else "")
 
-        # Configurações do gráfico
-        self.axes.set_xlabel("Posição X")
-        self.axes.set_ylabel("Posição Y")
-        self.axes.set_title("Mapa de Linhas de Corte de Fogo", pad=20, size=12)
-        
-        # Adiciona grade com estilo melhorado
-        self.axes.grid(True, linestyle='--', alpha=0.7)
-        
-        # Adiciona legenda
-        if firebreak_positions:
-            self.axes.legend(loc='upper right', bbox_to_anchor=(1.15, 1))
+            ax.legend(loc="upper right", bbox_to_anchor=(1.15, 1))
 
-        # Mantém a proporção dos eixos igual
-        self.axes.set_aspect("equal", adjustable="box")
-
-        # Ajusta o layout para evitar cortes
-        self.fig.tight_layout()
-
-        self.canvas.draw()
+        ax.set_xlabel("Posição X"); ax.set_ylabel("Posição Y")
+        ax.set_title("Mapa de Linhas de Corte de Fogo", pad=20, size=12)
+        ax.grid(True, linestyle="--", alpha=0.7)
+        ax.set_aspect("equal", adjustable="box")
+        self.fig.tight_layout(); self.canvas.draw()
