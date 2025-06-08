@@ -73,4 +73,4 @@ Este projeto está licenciado sob a licença MIT. Consulta [LICENSE](LICENSE) pa
 
 ---
 
-✨ Desenvolvido por \[Teu Nome ou Equipa] ✨
+✨ Desenvolvido por \David Fidalgo ✨
