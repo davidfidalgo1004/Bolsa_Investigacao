@@ -1,7 +1,12 @@
+# Standard library imports
 import math
 import random
+
+# Third-party imports
 from mesa import Agent
-from ProbVento import Ignicaoprob
+
+# Local imports
+from components.settings.ProbVento import Ignicaoprob
 
 class FragulhaAgent(Agent):
     def __init__(self, unique_id, model, origin_pos):
@@ -206,7 +211,6 @@ class PatchAgent(Agent):
 
             # Chance de gerar nova fagulha
             if random.random() < 0.20:
-                from agentes import FragulhaAgent
                 new_f = FragulhaAgent(
                     self.model.agent_id_counter,
                     self.model,

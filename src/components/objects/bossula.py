@@ -1,5 +1,8 @@
+# Standard library imports
 import sys
 from math import sin, cos, radians
+
+# Third-party imports
 from PySide6.QtWidgets import QApplication, QWidget, QVBoxLayout, QSlider
 from PySide6.QtGui import QPainter, QPen, QBrush, QColor
 from PySide6.QtCore import Qt, QPointF

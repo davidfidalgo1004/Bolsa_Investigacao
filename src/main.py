@@ -1,18 +1,25 @@
+# Standard library imports
 import sys
 import random
 
+# Third-party imports
 from PySide6.QtWidgets import (
     QApplication, QMainWindow, QWidget, QGridLayout, QHBoxLayout, QVBoxLayout,
     QLabel, QSlider, QPushButton, QTextEdit, QGraphicsScene, QGraphicsView,
-    QFormLayout, QRadioButton, QButtonGroup, QToolTip)
+    QFormLayout, QRadioButton, QButtonGroup, QToolTip
+)
 from PySide6.QtCore import Qt, Slot, QTimer, QEvent
 from PySide6.QtGui import QBrush, QColor, QGuiApplication, QPixmap, QCursor
-from bossula import CompassWidget
 
-from ambiente import EnvironmentModel
-from firefighter_agent import FirefighterAgent
-from MapColor import EncontrarCor
-from GraficoAnalise import GraphWindow, FragulhaArrowsWindow, FireStartWindow, FirebreakMapWindow, plot_response_heatmap, plot_trajectories
+# Local imports
+from components.objects.bossula import CompassWidget
+from Environment.ambiente import EnvironmentModel
+from Agents.firefighter_agent import FirefighterAgent
+from components.settings.MapColor import EncontrarCor
+from components.objects.GraficoAnalise import (
+    GraphWindow, FragulhaArrowsWindow, FireStartWindow, 
+    FirebreakMapWindow, plot_trajectories
+)
 
 class HoverValueSlider(QSlider):
     """
@@ -102,30 +109,33 @@ class SimulationApp(QMainWindow):
 
         self.cell_size = 5
 
-        # Carrega ícone da sirene (80% da célula) ou fallback azul-escuro
+        # Carrega ícone da sirene (100% da célula) ou fallback azul-escuro
         try:
-            self.siren_icon = QPixmap("siren.jpg").scaled(
-                int(self.cell_size * 0.8),
-                int(self.cell_size * 0.8),
+            self.siren_icon = QPixmap("components/assets/patch/siren.jpg").scaled(
+                self.cell_size,
+                self.cell_size,
                 Qt.KeepAspectRatio,
                 Qt.SmoothTransformation
             )
-        except Exception:
+            print(f"✅ Siren icon loaded: {not self.siren_icon.isNull()}, size: {self.siren_icon.width()}x{self.siren_icon.height()}")
+        except Exception as e:
+            print(f"❌ Failed to load siren icon: {e}")
             self.siren_icon = QPixmap(self.cell_size, self.cell_size)
             self.siren_icon.fill(QColor("#00008B"))
         self.siren_items = []
 
         try:
-            self.tech_icon = QPixmap("bombeirotec.jpg").scaled(
-                int(self.cell_size * 0.8),
-                int(self.cell_size * 0.8),
+            self.tech_icon = QPixmap("components/assets/patch/bombeirotec.jpg").scaled(
+                self.cell_size,
+                self.cell_size,
                 Qt.KeepAspectRatio,
                 Qt.SmoothTransformation
             )
-        except Exception:
-            # fallback para caso não encontre o arquivo
-            self.siren_icon = QPixmap(self.cell_size, self.cell_size)
-            self.siren_icon.fill(QColor("#00008B"))
+            print(f"✅ Tech icon loaded: {not self.tech_icon.isNull()}, size: {self.tech_icon.width()}x{self.tech_icon.height()}")
+        except Exception as e:
+            print(f"❌ Failed to load tech icon: {e}")
+            self.tech_icon = QPixmap(self.cell_size, self.cell_size)
+            self.tech_icon.fill(QColor("#00008B"))
          # Painel inferior (cria o widget e o layout antes de usar)
         self.bottom_left_widget = QWidget()
         self.bottom_left_layout = QVBoxLayout(self.bottom_left_widget)
@@ -304,6 +314,43 @@ class SimulationApp(QMainWindow):
     def add_log(self, message: str):
         self.log_text.append(message)
 
+    def update_firefighter_status_label(self):
+        """Atualiza a label com o status atual dos bombeiros."""
+        firefighters = [a for a in self.model.schedule if isinstance(a, FirefighterAgent)]
+        
+        # Contagem por modo específico
+        em_ataque = sum(1 for f in firefighters if f.mode == "direct_attack")
+        navegando = sum(1 for f in firefighters if f.mode == "navigating")
+        criando_firebreak = sum(1 for f in firefighters if f.mode == "firebreak")
+        retornando_casa = sum(1 for f in firefighters if f.mode == "returning_home")
+        ociosos = sum(1 for f in firefighters if f.mode == "idle")
+        evacuados = sum(1 for f in firefighters if f.mode == "evacuated")
+        
+        # Contagem por técnica
+        bombeiros_agua = sum(1 for f in firefighters if f.technique == "water")
+        bombeiros_tecnico = sum(1 for f in firefighters if f.technique == "alternative")
+        
+        # Atualiza rótulo de status dos bombeiros
+        status_text = f"Bombeiros (💧{bombeiros_agua} | 🔧{bombeiros_tecnico}) – "
+        
+        if em_ataque > 0:
+            status_text += f"Ataque: {em_ataque}, "
+        if criando_firebreak > 0:
+            status_text += f"Firebreak: {criando_firebreak}, "
+        if navegando > 0:
+            status_text += f"Movendo: {navegando}, "
+        if retornando_casa > 0:
+            status_text += f"Regressando: {retornando_casa}, "
+        if ociosos > 0:
+            status_text += f"Ociosos: {ociosos}, "
+        if evacuados > 0:
+            status_text += f"Evacuados: {evacuados}, "
+        
+        # Remove vírgula final
+        status_text = status_text.rstrip(", ")
+        
+        self.ff_status_label.setText(status_text)
+
 
     @Slot()
     def setup_model(self):
@@ -314,7 +361,6 @@ class SimulationApp(QMainWindow):
             self.air_co_evol or self.temp_evol):
             self.add_log("Exibindo gráficos da simulação anterior...")
             self.show_graph_window()
-            plot_response_heatmap(self.model, self.world_width, self.world_height)
             plot_trajectories(self.model)
 
         self.add_log("Recriando o modelo com novas configurações...")
@@ -389,6 +435,9 @@ class SimulationApp(QMainWindow):
 
         self.has_setup = True
         self.run_button.setText("Iniciar Simulação")
+
+        # Atualiza label dos bombeiros na inicialização
+        self.update_firefighter_status_label()
 
         # Iteração
         self.current_iteration = 0
@@ -493,15 +542,8 @@ class SimulationApp(QMainWindow):
                     chosen.pcolor = 15
                     self.fire_start_positions.append(chosen.pos)
         
-        # Contagem de estados dos bombeiros
-        firefighters = [a for a in self.model.schedule if isinstance(a, FirefighterAgent)]
-        ativos = sum(1 for f in firefighters if f.mode != "evacuated")
-        em_ataque = sum(1 for f in firefighters if f.mode == "direct_attack")
-        evacuados = sum(1 for f in firefighters if f.mode == "evacuated")
-        # Atualiza rótulo de status dos bombeiros
-        self.ff_status_label.setText(
-            f"Bombeiros – Ativos: {ativos}, Em ataque: {em_ataque}, Evacuados: {evacuados}"
-        )
+        # Atualiza label dos bombeiros
+        self.update_firefighter_status_label()
 
         self.update_grid()
         self.current_iteration += 1
@@ -520,7 +562,7 @@ class SimulationApp(QMainWindow):
             self.graphics_scene.removeItem(item)
         self.siren_items = []
 
-        icon_offset = int(self.cell_size * 0.1)  # margem para canto
+        icon_offset = 0  # sem margem, ícone ocupa toda a célula
         for agent in self.model.schedule:
             if hasattr(agent, "pos") and hasattr(agent, "pcolor"):
                 x, y = agent.pos

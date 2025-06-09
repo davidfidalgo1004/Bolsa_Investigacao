@@ -1,8 +1,11 @@
 # firefighter_agent.py
 
-from mesa import Agent
+# Standard library imports
 import math
 import random
+
+# Third-party imports
+from mesa import Agent
 
 
 class FirefighterAgent(Agent):
@@ -11,9 +14,10 @@ class FirefighterAgent(Agent):
         self.unique_id = unique_id
         self.model = model
         self.pos = pos
+        self.starting_pos = pos  # Guarda posição inicial para retorno
         self.technique = technique  # "water" ou "alternative"
         self.pcolor = 205          # mantém cor base (azul-escuro)
-        self.mode = "idle"         # idle | navigating | direct_attack | firebreak | evacuated
+        self.mode = "idle"         # idle | navigating | direct_attack | firebreak | evacuated | returning_home
         self.extinguish_capacity = 2  # Reduzido de 3 para 2 para apagar mais rápido
         self.extinguish_progress: dict = {}
         self.firebreak_width = 2   # Largura inicial da linha de corte
@@ -53,12 +57,20 @@ class FirefighterAgent(Agent):
             if getattr(a, "state", None) == "burning"
         ]
         if not active_fires:
-            self.mode = "idle"
+            # Se não há fogo, retorna ao ponto de partida
+            if self.pos != self.starting_pos:
+                self.mode = "returning_home"
+                self._move_towards_home()
+                self.last_action = "returning_home"
+            else:
+                self.mode = "idle"
+                self.last_action = "idle"
+            
+            # Limpa alvos de firebreak
             self.firebreak_target = None
             self.firebreak_angle = None
             self.firebreak_center = None
             self.firebreak_length = 0
-            self.last_action = "idle"
             return
 
         # Bombeiros com água focam em apagar o fogo diretamente
@@ -169,21 +181,32 @@ class FirefighterAgent(Agent):
 
         # Se chegou ao alvo atual
         if self.pos == self.firebreak_target:
-            # Cria o firebreak neste ponto
-            self.set_firebreak(self.pos)
-            self.firebreak_length += 1
+            # Tenta criar o firebreak neste ponto
+            if self.set_firebreak(self.pos):
+                self.firebreak_length += 1
+                if self.technique == "alternative":
+                    print(f"Bombeiro Técnico {self.unique_id} criou firebreak em {self.pos}, comprimento={self.firebreak_length}")
+            else:
+                if self.technique == "alternative":
+                    print(f"Bombeiro Técnico {self.unique_id} não pôde criar firebreak em {self.pos} - local inadequado")
             
-            if self.technique == "alternative":
-                print(f"Bombeiro Técnico {self.unique_id} criou firebreak em {self.pos}, comprimento={self.firebreak_length}")
-            
-            # Calcula o próximo ponto
+            # Calcula o próximo ponto (independentemente de ter criado firebreak ou não)
             current_offset = math.dist(self.pos, self.firebreak_center)
             next_point = self.calculate_next_firebreak_point(current_offset + 1)
             
-            if next_point and self.firebreak_length < self.max_firebreak_length:
+            # Procura um ponto adequado saltando locais inadequados
+            attempts = 0
+            while next_point and attempts < 5:  # Máximo 5 tentativas para encontrar local adequado
+                if self._is_suitable_for_firebreak(next_point):
+                    break
+                current_offset += 1
+                next_point = self.calculate_next_firebreak_point(current_offset)
+                attempts += 1
+            
+            if next_point and self.firebreak_length < self.max_firebreak_length and attempts < 5:
                 self.firebreak_target = next_point
             else:
-                # Se não há mais pontos ou atingiu o comprimento máximo, procura novo alvo
+                # Se não há mais pontos adequados ou atingiu o comprimento máximo, procura novo alvo
                 self.firebreak_target = None
                 self.firebreak_angle = None
                 self.firebreak_center = None
@@ -204,6 +227,10 @@ class FirefighterAgent(Agent):
 
     def set_firebreak(self, pos):
         """Cria ou reforça um firebreak e regista a posição."""
+        # Verifica se é um local adequado para firebreak
+        if not self._is_suitable_for_firebreak(pos):
+            return False
+            
         # 1) Marca o patch como firebreak (se ainda não estiver)
         for patch in self.model.grid.get_cell_list_contents(pos):
             if getattr(patch, "state", None) != "firebreak":
@@ -216,6 +243,51 @@ class FirefighterAgent(Agent):
 
         if pos not in self.model.firebreak_history:
             self.model.firebreak_history.append(pos)
+        
+        return True
+    
+    def _is_suitable_for_firebreak(self, pos):
+        """Verifica se a posição é adequada para criar firebreak."""
+        patches = self.model.grid.get_cell_list_contents(pos)
+        for patch in patches:
+            state = getattr(patch, "state", None)
+            # Não criar firebreaks em:
+            # - Zonas queimadas ("burned")
+            # - Fogo ativo ("burning") 
+            # - Rios ("river")
+            # - Firebreaks já existentes ("firebreak")
+            if state in ["burned", "burning", "river", "firebreak"]:
+                return False
+            
+            # Locais ideais para firebreak:
+            # - Zonas vazias ("empty") - melhor opção
+            # - Estradas ("road") - também bom
+            # - Florestas ("forested") - aceitável mas não ideal
+            if state in ["empty", "road"]:
+                return True
+            elif state == "forested":
+                # Para florestas, só aceita se não houver alternativa melhor nas proximidades
+                return self._no_better_alternative_nearby(pos)
+        
+        return True  # Se não encontrou patch, assume que é adequado
+    
+    def _no_better_alternative_nearby(self, pos, radius=2):
+        """Verifica se não há locais melhores nas proximidades."""
+        neighborhood = self.model.grid.get_neighborhood(
+            pos, moore=True, include_center=False, radius=radius
+        )
+        
+        for nx, ny in neighborhood:
+            if (0 <= nx < self.model.world_width and 
+                0 <= ny < self.model.world_height):
+                patches = self.model.grid.get_cell_list_contents((nx, ny))
+                for patch in patches:
+                    state = getattr(patch, "state", None)
+                    # Se há locais vazios ou estradas próximas, prefere esses
+                    if state in ["empty", "road"]:
+                        return False
+        
+        return True  # Não há alternativas melhores próximas
 
     def _try_extinguish_neighbors(self) -> bool:
         """Tenta apagar fogo nas células adjacentes (raio 1)."""
@@ -238,9 +310,6 @@ class FirefighterAgent(Agent):
                         patch.burn_time = None
                         self.extinguish_progress.pop(key, None)
                         extinguished = True
-                        if key not in self.model.response_time:
-                            t0 = self.model.fire_start_iter.get(key, self.model.current_iteration)
-                            self.model.response_time[key] = self.model.current_iteration - t0
         return extinguished
 
     def _move_towards_priority_fire(self, fires):
@@ -256,7 +325,7 @@ class FirefighterAgent(Agent):
         wind_dx = round(math.sin(rad))
         wind_dy = -round(math.cos(rad))
 
-        # ponto “rendez-vous” a algumas células up-wind
+        # ponto "rendez-vous" a algumas células up-wind
         SAFE_DIST = 3
         upwind_target = (
             max(0, min(self.model.world_width  - 1, fx - wind_dx * SAFE_DIST)),
@@ -280,3 +349,22 @@ class FirefighterAgent(Agent):
                 for p in self.model.grid.get_cell_list_contents(new_pos)):
             self.model.grid.move_agent(self, new_pos)
             self.pos = new_pos
+
+    def _move_towards_home(self):
+        """Move-se em direção ao ponto de partida."""
+        x, y = self.pos
+        hx, hy = self.starting_pos
+        
+        # Calcula direção para casa
+        dx = 1 if hx > x else -1 if hx < x else 0
+        dy = 1 if hy > y else -1 if hy < y else 0
+        new_pos = (x + dx, y + dy)
+        
+        # Verifica se a nova posição está dentro dos limites e é segura
+        if (0 <= new_pos[0] < self.model.world_width and 
+            0 <= new_pos[1] < self.model.world_height):
+            # Só move se não estiver em fogo
+            if not any(getattr(p, "state", None) == "burning"
+                    for p in self.model.grid.get_cell_list_contents(new_pos)):
+                self.model.grid.move_agent(self, new_pos)
+                self.pos = new_pos

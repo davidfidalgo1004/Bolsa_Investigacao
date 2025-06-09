@@ -1,4 +1,7 @@
+# Standard library imports
 import os
+
+# Third-party imports
 import requests
 
 # 1. Token do Bearer (recomendado via variável de ambiente)

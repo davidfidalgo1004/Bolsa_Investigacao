@@ -1,10 +1,15 @@
 # ambiente.py
 
+# Standard library imports
+import random
+
+# Third-party imports
 from mesa import Model
 from mesa.space import MultiGrid
-import random
-from agentes import AirAgent, PatchAgent
-from firefighter_agent import FirefighterAgent   # <-- import do bombeiro
+
+# Local imports
+from Agents.agentes import AirAgent, PatchAgent
+from Agents.firefighter_agent import FirefighterAgent
 
 
 class EnvironmentModel(Model):
@@ -16,7 +21,6 @@ class EnvironmentModel(Model):
         self.running = True
         self.grid = MultiGrid(width, height, torus=False)
         self.schedule = []
-        self.response_time = {}    
         self.fire_start_iter = {}  
         
 

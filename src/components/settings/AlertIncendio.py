@@ -1,3 +1,4 @@
+# Third-party imports
 from PySide6.QtWidgets import QDialog, QVBoxLayout, QLabel, QPushButton
 
 class SensorAlertDialog(QDialog):

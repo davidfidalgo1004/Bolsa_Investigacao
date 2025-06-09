@@ -1,4 +1,6 @@
-# agent.py
+# ProbVento.py
+
+# Standard library imports
 import math
 
 def Ignicaoprob(p0, wind_velocidade, i, j, k, l, wind_angle_deg):
