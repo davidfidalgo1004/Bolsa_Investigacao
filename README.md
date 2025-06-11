@@ -101,7 +101,8 @@ docker run -p 5000:5000 simulador-incendios
 |----------|--------|
 | **Setup** | Configura o ambiente com os parâmetros atuais |
 | **Iniciar Simulação** | Começa a simulação automática |
-| **Próximo Passo** | Executa um step manual |
+| **⏸️ Pausar** | Pausa a simulação em execução |
+| **Próximo Passo** | Executa um step manual (passo-a-passo) |
 | **Iniciar Fogo** | Acende um foco de incêndio aleatório |
 | **Parar Fogo** | Extingue todos os focos ativos |
 | **Ver Gráficos** | Abre janelas de análise detalhada |
@@ -169,6 +170,7 @@ docker run -p 5000:5000 simulador-incendios
 ### 📖 Documentação Técnica
 
 - **[📋 Estrutura do Código](Documentação/ESTRUTURA_CODIGO.md)**: Arquitetura detalhada do sistema
+- **[⏸️ Funcionalidade de Pausa](Documentação/FUNCIONALIDADE_PAUSA.md)**: Controles avançados de simulação
 - **[🔬 Artigo Científico](Documentação/Post_Cientifico.pdf)**: Base teórica e validação
 - **[📋 Plano de Trabalho](Documentação/PlanoTrabalho.pdf)**: Metodologia e objetivos
 - **[📋 Relatório](Documentação/Relatorio.pdf)**: Documentação

@@ -83,6 +83,10 @@ class SimulationApp(QMainWindow):
 
         self.current_iteration = 0
         self.total_iterations = 0
+        
+        # Controle de pausa
+        self.is_paused = False
+        self.timer = None
 
         self.fire_start_positions = []
 
@@ -229,9 +233,22 @@ class SimulationApp(QMainWindow):
         self.run_button.clicked.connect(self.run_simulation)
         row1.addWidget(self.run_button)
 
+        self.pause_button = QPushButton("Pausar")
+        self.pause_button.clicked.connect(self.pause_simulation)
+        self.pause_button.setEnabled(False)  # Desabilitado inicialmente
+        row1.addWidget(self.pause_button)
+
+        self.step_button = QPushButton("Próximo Passo")
+        self.step_button.clicked.connect(self.single_step)
+        row1.addWidget(self.step_button)
+
         self.stop_fire_button = QPushButton("Apagar Fogo")
         self.stop_fire_button.clicked.connect(self.stop_fire)
         row1.addWidget(self.stop_fire_button)
+
+        self.graph_button = QPushButton("Ver Gráficos")
+        self.graph_button.clicked.connect(self.show_graph_window)
+        row1.addWidget(self.graph_button)
 
         self.fire_status_label = QLabel("Incêndio: Inativo (Temp: -- °C)")
         row1.addWidget(self.fire_status_label)
@@ -439,35 +456,66 @@ class SimulationApp(QMainWindow):
         # Atualiza label dos bombeiros na inicialização
         self.update_firefighter_status_label()
 
-        # Iteração
+        # Iteração e controles
         self.current_iteration = 0
         self.total_iterations = 0
+        
+        # Reset dos controles de simulação
+        if self.timer and self.timer.isActive():
+            self.timer.stop()
+        self.is_paused = False
+        self.run_button.setText("Iniciar Simulação")
+        self.run_button.setEnabled(True)
+        self.pause_button.setText("Pausar")
+        self.pause_button.setEnabled(False)
 
 
     @Slot()
     def run_simulation(self):
+        if self.is_paused:
+            # Retomar simulação pausada
+            self.is_paused = False
+            self.run_button.setText("Executando...")
+            self.run_button.setEnabled(False)
+            self.pause_button.setEnabled(True)
+            self.pause_button.setText("Pausar")
+            self.add_log("Simulação retomada!")
+            if self.timer:
+                self.timer.start()
+            return
+            
         self.setup_button.setEnabled(False)
         self.log_text.clear()
-        self.add_log("Iniciando/continuando simulação...")
-        self.run_button.setText("Continuar Simulação")
+        self.add_log("Iniciando simulação...")
+        self.run_button.setText("Executando...")
+        self.run_button.setEnabled(False)
+        self.pause_button.setEnabled(True)
+        self.pause_button.setText("Pausar")
 
         if self.current_iteration > 0:
             self.total_iterations += self.iter_slider.value()
         else:
             self.total_iterations = self.iter_slider.value()
 
-        self.timer = QTimer()
-        self.timer.setInterval(250)
-        self.timer.timeout.connect(self.simulation_step)
+        if not self.timer:
+            self.timer = QTimer()
+            self.timer.setInterval(250)
+            self.timer.timeout.connect(self.simulation_step)
         self.timer.start()
 
 
     @Slot()
     def simulation_step(self):
         if self.current_iteration >= self.total_iterations:
-            self.timer.stop()
+            if self.timer:
+                self.timer.stop()
             self.add_log("\nSimulação finalizada!")
             self.setup_button.setEnabled(True)
+            self.run_button.setText("Iniciar Simulação")
+            self.run_button.setEnabled(True)
+            self.pause_button.setEnabled(False)
+            self.pause_button.setText("Pausar")
+            self.is_paused = False
             return
         if self.current_iteration % 20 == 0:
             if random.random() < self.model.rain_level:
@@ -548,6 +596,33 @@ class SimulationApp(QMainWindow):
         self.update_grid()
         self.current_iteration += 1
 
+    @Slot()
+    def pause_simulation(self):
+        """Pausa ou retoma a simulação."""
+        if not self.is_paused:
+            # Pausar simulação
+            self.is_paused = True
+            if self.timer:
+                self.timer.stop()
+            self.run_button.setText("Retomar Simulação")
+            self.run_button.setEnabled(True)
+            self.pause_button.setText("Pausado")
+            self.pause_button.setEnabled(False)
+            self.add_log("⏸️ Simulação pausada! Use 'Retomar Simulação' ou 'Próximo Passo'")
+
+    @Slot()
+    def single_step(self):
+        """Executa um único passo da simulação."""
+        if self.current_iteration >= self.total_iterations:
+            self.add_log("Simulação já finalizada! Use 'Setup' para reiniciar.")
+            return
+            
+        # Se a simulação estiver executando, pause primeiro
+        if self.timer and self.timer.isActive():
+            self.pause_simulation()
+            
+        self.add_log(f"🔄 Executando passo único: {self.current_iteration + 1}")
+        self.simulation_step()
 
     @Slot()
     def stop_fire(self):
