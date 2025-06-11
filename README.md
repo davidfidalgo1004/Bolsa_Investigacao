@@ -170,7 +170,8 @@ docker run -p 5000:5000 simulador-incendios
 
 - **[📋 Estrutura do Código](Documentação/ESTRUTURA_CODIGO.md)**: Arquitetura detalhada do sistema
 - **[🔬 Artigo Científico](Documentação/Post_Cientifico.pdf)**: Base teórica e validação
-- **[📋 Plano de Trabalho](Documentação/PlanoTrabalho.docx)**: Metodologia e objetivos
+- **[📋 Plano de Trabalho](Documentação/PlanoTrabalho.pdf)**: Metodologia e objetivos
+- **[📋 Relatório](Documentação/Relatorio.pdf)**: Documentação
 
 ### 🎓 Exemplos de Uso
 
@@ -266,7 +267,7 @@ O projeto inclui cenários pré-definidos na pasta `Simulações/`:
 
 - **Investigador Principal**: David Fidalgo
 - **Instituição**: INESCTEC
-- **Email**: [seu-email@example.com]
+- **Email**: [david.fidalgo1010@hotmail.com]
 
 ---
 
@@ -298,7 +299,5 @@ of this software and associated documentation files...
 <div align="center">
 
 **⭐ Se este projeto foi útil, deixe uma estrela! ⭐**
-
-*Desenvolvido com ❤️ para a investigação científica em Portugal*
 
 </div>
