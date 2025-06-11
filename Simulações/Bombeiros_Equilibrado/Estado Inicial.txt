@@ -1,0 +1,10 @@
+Estado Inicial
+Temperatura-> 25º
+Vento Direção -> Norte
+Vento Velocidade -> 4m/s
+Humidade-> 15%
+Precipitação-> 17%
+Nº Iterações -> 200
+Nº Bombeiros -> 100
+Bombeiros de ataque direto -> 50
+Bombeiros de ataque indireto -> 50

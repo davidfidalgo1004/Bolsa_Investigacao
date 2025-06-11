@@ -1,0 +1,20 @@
+# Simulador Integrado de Incêndios Florestais
+# Dependências principais
+
+# Framework Multi-Agente
+mesa>=2.1.0
+
+# Interface Gráfica
+PySide6>=6.5.0
+
+# Análise e Visualização de Dados
+matplotlib>=3.7.0
+numpy>=1.24.0
+scipy>=1.10.0
+
+# Processamento de Dados Científicos
+pandas>=2.0.0
+
+# Utilitários Adicionais
+seaborn>=0.12.0  # Para gráficos mais bonitos
+pillow>=9.5.0    # Para processamento de imagens/ícones 
