@@ -171,7 +171,8 @@ docker run -p 5000:5000 simulador-incendios
 
 - **[📋 Estrutura do Código](Documentação/ESTRUTURA_CODIGO.md)**: Arquitetura detalhada do sistema
 - **[⏸️ Funcionalidade de Pausa](Documentação/FUNCIONALIDADE_PAUSA.md)**: Controles avançados de simulação
-- **[🔬 Artigo Científico](Documentação/Post_Cientifico.pdf)**: Base teórica e validação
+- **[🔬 Post Científico](Documentação/Post_Cientifico.pdf)**: Post de demonstração
+- **[🔬 Artigo Científico](Documentação/Artigo_Cientifico.pdf)**: Demonstração teórica
 - **[📋 Plano de Trabalho](Documentação/PlanoTrabalho.pdf)**: Metodologia e objetivos
 - **[📋 Relatório](Documentação/Relatorio.pdf)**: Documentação
 
@@ -280,7 +281,7 @@ Este projeto está licenciado sob a **Licença MIT**. Consulte o ficheiro [LICEN
 ```
 MIT License
 
-Copyright (c) 2024 David Fidalgo - INESCTEC
+Copyright (c) 2025 David Fidalgo - INESCTEC
 
 Permission is hereby granted, free of charge, to any person obtaining a copy
 of this software and associated documentation files...
@@ -290,7 +291,7 @@ of this software and associated documentation files...
 
 ## 🎉 Agradecimentos
 
-- **INESCTEC** - Apoio institucional e recursos
+- **INESCTEC** - Apoio institucional
 - **Mesa Framework** - Base para sistema multi-agente
 - **PySide6/Qt** - Interface gráfica robusta
 - **Matplotlib** - Visualização de dados científicos
