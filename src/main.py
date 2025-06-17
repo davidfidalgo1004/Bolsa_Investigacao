@@ -1,6 +1,10 @@
 # Standard library imports
 import sys
 import random
+import subprocess, os, webbrowser, time, json
+from pathlib import Path
+import requests
+from components.settings.geradorAPIs import generate_token
 
 # Third-party imports
 from PySide6.QtWidgets import (
@@ -20,6 +24,17 @@ from components.objects.GraficoAnalise import (
     GraphWindow, FragulhaArrowsWindow, FireStartWindow, 
     FirebreakMapWindow, plot_trajectories
 )
+
+# ------------- Wildfire API Config -------------
+BASE_URL = os.getenv("WILDFIRE_API_BASE_URL", "http://ken01.utad.pt:8080")
+AUDIENCE = os.getenv("WILDFIRE_API_AUDIENCE", "ken01.utad.pt:8080")
+TOKEN = os.getenv("WILDFIRE_API_TOKEN") or generate_token(AUDIENCE)
+
+HEADERS = {
+    "Authorization": f"Bearer {TOKEN}",
+    "Content-Type": "application/json",
+    "Accept": "application/json",
+}
 
 class HoverValueSlider(QSlider):
     """
@@ -89,6 +104,12 @@ class SimulationApp(QMainWindow):
         self.timer = None
 
         self.fire_start_positions = []
+
+        # Valor de risco recebido via API (0-1); usado para probabilidades de ignição
+        self.api_risk_value = None
+
+        # Flag para permitir apenas uma ignição automática até voltar a ser reactivada
+        self.fireigni = True
 
         self.has_setup = False
 
@@ -225,6 +246,22 @@ class SimulationApp(QMainWindow):
             self.env_type_group.addButton(btn)
             row1.addWidget(btn)
 
+        # Guarda para alternar visibilidade
+        self.env_type_widgets = [
+            self.radio_only_trees,
+            self.radio_road_trees,
+            self.radio_river_trees,
+        ]
+
+        # ---------------- Modo de operação ----------------
+        self.mode_group = QButtonGroup()
+        self.radio_sim_mode = QRadioButton("Modo Simulado")
+        self.radio_real_mode = QRadioButton("Modo Real (API)")
+        self.radio_sim_mode.setChecked(True)
+        for btn in [self.radio_sim_mode, self.radio_real_mode]:
+            self.mode_group.addButton(btn)
+            row1.addWidget(btn)
+
         self.setup_button = QPushButton("Setup")
         self.setup_button.clicked.connect(self.setup_model)
         row1.addWidget(self.setup_button)
@@ -242,16 +279,15 @@ class SimulationApp(QMainWindow):
         self.step_button.clicked.connect(self.single_step)
         row1.addWidget(self.step_button)
 
-        self.stop_fire_button = QPushButton("Apagar Fogo")
-        self.stop_fire_button.clicked.connect(self.stop_fire)
-        row1.addWidget(self.stop_fire_button)
-
-        self.graph_button = QPushButton("Ver Gráficos")
-        self.graph_button.clicked.connect(self.show_graph_window)
-        row1.addWidget(self.graph_button)
+        # Botão para encerrar e visualizar resultados
+        self.end_button = QPushButton("Encerrar Simulação")
+        self.end_button.clicked.connect(self.stop_and_show_results)
+        self.end_button.setEnabled(False)
+        row1.addWidget(self.end_button)
 
         self.fire_status_label = QLabel("Incêndio: Inativo (Temp: -- °C)")
-        row1.addWidget(self.fire_status_label)
+        # Label ocultada para simplificar a interface
+        self.fire_status_label.hide()
 
         controls_layout.addLayout(row1)
 
@@ -305,6 +341,16 @@ class SimulationApp(QMainWindow):
         self.temp_slider.setValue(25)
         row2.addWidget(self.temp_slider)
 
+        # Guarda widgets climáticos para poder ocultar em modo API
+        self.climate_widgets = [
+            wind_speed_label, self.wind_speed_slider,
+            wind_direction_label, self.wind_direction_slider,
+            density_label, self.density_slider,
+            precip_label, self.precip_slider,
+            humid_label, self.humid_slider,
+            temp_label, self.temp_slider,
+        ]
+
         controls_layout.addLayout(row2)
         self.main_layout.addWidget(controls_widget, 0, 0, 1, 2)
 
@@ -327,6 +373,21 @@ class SimulationApp(QMainWindow):
         # Adiciona a nova linha de controles ao layout principal de controles
         controls_layout.addLayout(row3)
 
+        # Linha 4: Integração com GeoJSON / API de risco
+        row4 = QHBoxLayout()
+        self.choose_loc_button = QPushButton("Escolher Local (Mapa)")
+        self.choose_loc_button.clicked.connect(self.choose_location)
+        row4.addWidget(self.choose_loc_button)
+
+        self.calc_risk_button = QPushButton("Calcular Risco da Área")
+        self.calc_risk_button.clicked.connect(self.load_area_and_risk)
+        row4.addWidget(self.calc_risk_button)
+
+        controls_layout.addLayout(row4)
+
+        # Actualiza visibilidade conforme modo inicial
+        self.radio_sim_mode.toggled.connect(self.update_controls_visibility)
+        self.update_controls_visibility()
 
     def add_log(self, message: str):
         self.log_text.append(message)
@@ -522,6 +583,24 @@ class SimulationApp(QMainWindow):
                 self.model.itsrain_ = True
             else:
                 self.model.itsrain_ = False
+            # Probabilidade de ignição inicial: base 5% ajustada pelo valor de risco da API
+            ignition_prob = 0.05
+            if self.api_risk_value is not None:
+                # Escalona: risco 0 → +0%, risco 1 → +20%
+                ignition_prob += min(max(self.api_risk_value, 0), 1) * 0.20
+
+            if random.random() < ignition_prob and self.fireigni==True:
+                self.fireigni=False
+                forested_patches = [
+                    a for a in self.model.schedule
+                    if getattr(a, "state", None) == "forested"
+                ]
+                if forested_patches:
+                    chosen = random.choice(forested_patches)
+                    chosen.state = "burning"
+                    chosen.pcolor = 15
+                    self.fire_start_positions.append(chosen.pos)
+        
         # Atualiza parâmetros a cada iteração
         self.model.current_iteration = self.current_iteration
         self.model.wind_direction = (self.model.wind_direction + random.uniform(-1, 1)) % 360
@@ -576,20 +655,6 @@ class SimulationApp(QMainWindow):
         self.add_log(
             f"Iteração {self.current_iteration} | Queimadas: {burned}, Florestadas: {forested}"
         )
-        # Chance de iniciar incêndio aleatório
-        if (self.model.temperature < 30 or air_status != "Perigo"):
-            if random.random() < 0.05 and self.fireigni==True:
-                self.fireigni=False
-                forested_patches = [
-                    a for a in self.model.schedule
-                    if getattr(a, "state", None) == "forested"
-                ]
-                if forested_patches:
-                    chosen = random.choice(forested_patches)
-                    chosen.state = "burning"
-                    chosen.pcolor = 15
-                    self.fire_start_positions.append(chosen.pos)
-        
         # Atualiza label dos bombeiros
         self.update_firefighter_status_label()
 
@@ -646,6 +711,8 @@ class SimulationApp(QMainWindow):
                 # Se for firebreak, pode forçar uma cor específica
                 if getattr(agent, "state", None) == "firebreak":
                     qt_color = QColor("#8B4513")  # marrom, por exemplo
+                elif getattr(agent, "state", None) == "house":
+                    qt_color = QColor("#C0C0C0")  # cinza casas
                 self.cells[y][x].setBrush(QBrush(qt_color))
 
                 # Sobrepõe ícone se for bombeiro
@@ -766,6 +833,527 @@ class SimulationApp(QMainWindow):
             )
             firebreak_dialog.setWindowTitle("Mapa de Linhas de Corte")
             firebreak_dialog.show()
+
+        # ---------------- GeoJSON / API Risco ----------------
+    
+    def _start_streamlit(self):
+        """Inicia o servidor Streamlit se ainda não estiver em execução."""
+        if getattr(self, "_geojson_process", None) and self._geojson_process.poll() is None:
+            return  # Já está em execução
+
+        self.add_log("🗺️ Iniciando interface de seleção de local (Streamlit)...")
+        try:
+            # Caminho absoluto para o novo ficheiro Streamlit
+            script_path = Path(__file__).resolve().parent / "components" / "objects" / "geojson_interface.py"
+            self._geojson_process = subprocess.Popen([
+                sys.executable, "-m", "streamlit", "run", str(script_path),
+                "--server.port", "8501", "--server.headless", "true"
+            ], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+            # Dá tempo para o servidor lançar
+            time.sleep(2)
+        except FileNotFoundError:
+            self.add_log("⚠️ Streamlit não encontrado. Instale com 'pip install streamlit'.")
+            self._geojson_process = None
+
+    @Slot()
+    def choose_location(self):
+        """Abre a interface Streamlit para escolha de área."""
+        self._start_streamlit()
+        if getattr(self, "_geojson_process", None):
+            webbrowser.open("http://localhost:8501", new=2)
+            self.add_log("⚙️ Interface aberta no navegador. Desenhe o polígono e use 'Export' para guardar 'area.geojson'.")
+
+    @Slot()
+    def load_area_and_risk(self):
+        """Carrega o ficheiro area.geojson exportado e calcula o risco via API."""
+        area_path = Path("area.geojson")
+        if not area_path.exists():
+            self.add_log("⚠️ Ficheiro 'area.geojson' não encontrado. Exporte primeiro na interface de mapa.")
+            return
+        try:
+            geojson = json.loads(area_path.read_text(encoding="utf-8"))
+        except Exception as e:
+            self.add_log(f"⚠️ Erro ao ler 'area.geojson': {e}")
+            return
+
+        self.add_log("🔎 A calcular risco da área selecionada…")
+        result = self._calculate_risk_api(geojson)
+        if result is not None:
+            self.add_log(f"✅ Resultado do risco: {result}")
+
+            # Aplica valores climáticos apenas se estiver em Modo Real (API)
+            if self.radio_real_mode.isChecked():
+                self._apply_api_values(result)
+
+            # Se ainda não houver modelo criado em modo Real, cria-o agora
+            if not self.has_setup:
+                self._initialize_model_from_current_settings()
+
+            # Desenha estradas (se houver)
+            try:
+                self._draw_roads_from_geojson(geojson)
+            except Exception as e:
+                self.add_log(f"⚠️ Não foi possível desenhar estradas do ficheiro: {e}")
+
+            # Se não houver LineStrings, tenta buscar estradas ao OpenStreetMap
+            try:
+                self._fetch_and_draw_osm_roads(geojson)
+                self._fetch_and_draw_osm_buildings(geojson)
+            except Exception as e:
+                self.add_log(f"⚠️ Overpass falhou: {e}")
+
+    def _calculate_risk_api(self, geojson, **params):
+        """Wrapper para chamar o endpoint /calculate-risk/."""
+        try:
+            resp = requests.post(f"{BASE_URL}/calculate-risk/", headers=HEADERS, params=params, json=geojson, timeout=30)
+            resp.raise_for_status()
+            return resp.json()
+        except requests.HTTPError as err:
+            self.add_log(f"❌ Erro API {err.response.status_code}: {err.response.text}")
+        except Exception as exc:
+            self.add_log(f"❌ Erro ao contactar API: {exc}")
+        return None
+
+    def _apply_api_values(self, result):
+        """Aplica os valores devolvidos pela API à configuração actual.
+
+        O objecto `result` é um FeatureCollection. Para cada feature do tipo
+        *Polygon* recolhemos as propriedades pertinentes. Se houver várias
+        features, calculamos a média simples; caso exista apenas uma, usamos
+        directamente."""
+
+        # --- Extracção dos valores das propriedades ---
+        keys_of_interest = [
+            "temperature", "humidity", "precipitation",
+            "wind_speed", "wind_direction"
+        ]
+
+        agg = {k: [] for k in keys_of_interest}
+
+        features = result.get("features", []) if isinstance(result, dict) else []
+        for feat in features:
+            props = feat.get("properties", {})
+            for k in keys_of_interest:
+                if k in props and props[k] is not None:
+                    agg[k].append(props[k])
+
+        # Se não encontrámos nada, avisa e sai
+        if not any(agg.values()):
+            self.add_log("⚠️ A resposta não contém valores climáticos utilizáveis.")
+            return
+
+        def _mean(values):
+            return sum(values) / len(values) if values else None
+
+        averaged = {k: _mean(v) for k, v in agg.items()}
+
+        # --- Sincroniza sliders ---
+        def _set_slider(slider, value, minimum=None, maximum=None):
+            if value is None:
+                return
+            if minimum is None:
+                minimum = slider.minimum()
+            if maximum is None:
+                maximum = slider.maximum()
+            value = max(min(value, maximum), minimum)
+            slider.setValue(int(round(value)))
+
+        # Temperatura (°C)
+        _set_slider(self.temp_slider, averaged.get("temperature"))
+
+        # Humidade (%)
+        _set_slider(self.humid_slider, averaged.get("humidity"))
+
+        # Precipitação (%) – algumas APIs devolvem 0-1; converte para 0-100
+        precip_val = averaged.get("precipitation")
+        if precip_val is not None and precip_val <= 1:
+            precip_val *= 100
+        _set_slider(self.precip_slider, precip_val)
+
+        # Velocidade do vento (m/s)
+        _set_slider(self.wind_speed_slider, averaged.get("wind_speed"))
+
+        # Direcção do vento (graus 0-359)
+        wind_dir = averaged.get("wind_direction")
+        if wind_dir is not None:
+            wind_dir = wind_dir % 360
+        _set_slider(self.wind_direction_slider, wind_dir, 0, 359)
+
+        # --- Propaga imediatamente se já houver modelo configurado ---
+        if self.has_setup:
+            self.model.wind_direction = self.wind_direction_slider.value()
+            self.model.wind_speed = self.wind_speed_slider.value()
+            self.model.rain_level = self.precip_slider.value() / 100.0
+            self.model.humidity = self.humid_slider.value()
+            self.model.temperature = self.temp_slider.value()
+
+            self.add_log("🔄 Parâmetros do modelo actualizados com dados reais da API.")
+
+        # Determina o nível de risco mais elevado para colorir a grelha
+        def _risk_color(level: str):
+            mapping = {
+                "Very Low": "#9aff9a",      # verde claro
+                "Low": "#ccff66",          # amarelo-esverdeado
+                "Moderate": "#ffff66",     # amarelo
+                "High": "#ffb347",         # laranja
+                "Very High": "#ff704d",     # laranja-avermelhado
+                "Extreme": "#ff3333",      # vermelho
+            }
+            return mapping.get(level, None)
+
+        highest_feat = None
+        highest_val = -1
+        for feat in features:
+            props = feat.get("properties", {})
+            val = props.get("risk_value")
+            if val is not None and val > highest_val:
+                highest_val = val
+                highest_feat = feat
+
+        if highest_feat is not None:
+            risk_level = highest_feat["properties"].get("risk_level")
+            color_hex = _risk_color(risk_level)
+            if color_hex:
+                # Aplica cor de fundo a toda a grelha
+                for row in range(self.world_height):
+                    for col in range(self.world_width):
+                        self.cells[row][col].setBrush(QBrush(QColor(color_hex)))
+
+                self.add_log(f"🎨 Grelha colorida segundo nível de risco '{risk_level}'.")
+
+        # Guarda o valor de risco global para lógica de ignição
+        self.api_risk_value = highest_val if highest_val >= 0 else None
+
+    # ------------------------------------------------------------------
+    # GeoJSON → Estradas na grelha
+    # ------------------------------------------------------------------
+    def _draw_roads_from_geojson(self, geojson):
+        """Percorre o GeoJSON atrás de geometrias LineString / MultiLineString
+        (usadas normalmente para estradas) e pinta as respectivas células
+        como 'road'.
+
+        Requer que o modelo já tenha sido configurado (Setup executado)."""
+
+        if not self.has_setup:
+            self.add_log("⚠️ Execute o 'Setup' antes de aplicar estradas do GeoJSON.")
+            return
+
+        from Agents.agentes import PatchAgent  # import tardio para evitar ciclos
+
+        # 1) Extrai todas as coordenadas para calcular bounding box
+        def _collect_coords(geom):
+            gtype = geom.get("type")
+            if gtype == "LineString":
+                return geom.get("coordinates", [])
+            elif gtype == "MultiLineString":
+                coords = []
+                for line in geom.get("coordinates", []):
+                    coords.extend(line)
+                return coords
+            elif gtype == "Polygon":
+                return geom.get("coordinates", [])[0]  # limite exterior
+            elif gtype == "MultiPolygon":
+                coords = []
+                for poly in geom.get("coordinates", []):
+                    coords.extend(poly[0])
+                return coords
+            return []
+
+        all_coords = []
+        for feat in geojson.get("features", []):
+            geom = feat.get("geometry", {})
+            all_coords.extend(_collect_coords(geom))
+
+        if not all_coords:
+            self.add_log("⚠️ GeoJSON sem coordenadas utilizáveis.")
+            return
+
+        lons, lats = zip(*all_coords)
+        min_lon, max_lon = min(lons), max(lons)
+        min_lat, max_lat = min(lats), max(lats)
+
+        lon_span = max_lon - min_lon or 1e-9  # evita div/0
+        lat_span = max_lat - min_lat or 1e-9
+
+        def _to_grid(lon, lat):
+            gx = int(round((lon - min_lon) / lon_span * (self.world_width - 1)))
+            gy = int(round((max_lat - lat) / lat_span * (self.world_height - 1)))
+            gx = max(0, min(self.world_width - 1, gx))
+            gy = max(0, min(self.world_height - 1, gy))
+            return gx, gy
+
+        ROAD_RADIUS = 1  # torna a estrada mais larga
+
+        def _set_patch_road(x, y):
+            for dx in range(-ROAD_RADIUS, ROAD_RADIUS + 1):
+                for dy in range(-ROAD_RADIUS, ROAD_RADIUS + 1):
+                    gx, gy = x + dx, y + dy
+                    if 0 <= gx < self.world_width and 0 <= gy < self.world_height:
+                        for agent in self.model.schedule:
+                            if getattr(agent, "pos", None) == (gx, gy):
+                                if isinstance(agent, PatchAgent) and agent.state != "road":
+                                    agent.state = "road"
+                                    agent.pcolor = 85
+                                break
+
+        # 2) Varre features LineString / MultiLineString
+        for feat in geojson.get("features", []):
+            geom = feat.get("geometry", {})
+            gtype = geom.get("type")
+            if gtype not in ("LineString", "MultiLineString"):
+                continue
+
+            lines = geom.get("coordinates", [])
+            if gtype == "LineString":
+                lines = [lines]
+
+            for line in lines:
+                prev = None
+                for lon, lat in line:
+                    gx, gy = _to_grid(lon, lat)
+                    _set_patch_road(gx, gy)
+
+                    # Conecta com célula anterior para evitar falhas
+                    if prev is not None:
+                        px, py = prev
+                        dx = gx - px
+                        dy = gy - py
+                        steps = max(abs(dx), abs(dy))
+                        if steps:
+                            for i in range(1, steps):
+                                ix = px + round(dx * i / steps)
+                                iy = py + round(dy * i / steps)
+                                _set_patch_road(ix, iy)
+                    prev = (gx, gy)
+
+        # 3) Atualiza visualização
+        self.update_grid()
+        self.add_log("🛣️ Estradas do GeoJSON desenhadas na grelha.")
+
+    # ------------------------------------------------------------------
+    # Overpass API — estradas
+    # ------------------------------------------------------------------
+    def _fetch_and_draw_osm_roads(self, polygon_geojson):
+        """Consulta a Overpass API para obter 'ways' com tag highway dentro do
+        bounding box do polígono e desenha-as na grelha."""
+
+        # Extrai bounding box
+        coords = []
+        for feat in polygon_geojson.get("features", []):
+            geom = feat.get("geometry", {})
+            if geom.get("type") == "Polygon":
+                coords.extend(geom.get("coordinates", [[]])[0])
+        if not coords:
+            return  # sem polígono
+
+        lons, lats = zip(*coords)
+        min_lon, max_lon = min(lons), max(lons)
+        min_lat, max_lat = min(lats), max(lats)
+
+        overpass_query = f"""
+        [out:json][timeout:25];
+        (
+          way["highway"]({min_lat},{min_lon},{max_lat},{max_lon});
+        );
+        out geom;
+        """
+
+        resp = requests.post(
+            "https://overpass-api.de/api/interpreter",
+            data=overpass_query.encode("utf-8"),
+            timeout=60,
+        )
+        resp.raise_for_status()
+        data = resp.json()
+
+        road_features = []
+        for el in data.get("elements", []):
+            if el.get("type") == "way" and "geometry" in el:
+                coords_ll = [[pt["lon"], pt["lat"]] for pt in el["geometry"]]
+                if len(coords_ll) >= 2:
+                    road_features.append(
+                        {
+                            "type": "Feature",
+                            "properties": {"highway": el.get("tags", {}).get("highway", "")},
+                            "geometry": {"type": "LineString", "coordinates": coords_ll},
+                        }
+                    )
+
+        if not road_features:
+            self.add_log("ℹ️ Nenhuma estrada encontrada na área (OSM).")
+            return
+
+        roads_geojson = {"type": "FeatureCollection", "features": road_features}
+        self._draw_roads_from_geojson(roads_geojson)
+
+    # ------------------------------------------------------------------
+    # Overpass API — edifícios
+    # ------------------------------------------------------------------
+    def _fetch_and_draw_osm_buildings(self, polygon_geojson):
+        """Obtém edifícios (ways/relações com tag building) dentro da área
+        e colore as células como 'house'."""
+
+        if not self.has_setup:
+            return  # ignora se o modelo ainda não existe
+
+        coords = []
+        for feat in polygon_geojson.get("features", []):
+            geom = feat.get("geometry", {})
+            if geom.get("type") == "Polygon":
+                coords.extend(geom.get("coordinates", [[]])[0])
+        if not coords:
+            return
+
+        lons, lats = zip(*coords)
+        min_lon, max_lon = min(lons), max(lons)
+        min_lat, max_lat = min(lats), max(lats)
+
+        overpass_query = f"""
+        [out:json][timeout:25];
+        (
+          way["building"]({min_lat},{min_lon},{max_lat},{max_lon});
+          relation["building"]({min_lat},{min_lon},{max_lat},{max_lon});
+        );
+        out geom;
+        """
+
+        resp = requests.post(
+            "https://overpass-api.de/api/interpreter",
+            data=overpass_query.encode("utf-8"),
+            timeout=60,
+        )
+        resp.raise_for_status()
+        data = resp.json()
+
+        if not data.get("elements"):
+            self.add_log("ℹ️ Nenhum edifício encontrado (OSM).")
+            return
+
+        from Agents.agentes import PatchAgent
+
+        # Conversão lon/lat → grid
+        lon_span = max_lon - min_lon or 1e-9
+        lat_span = max_lat - min_lat or 1e-9
+
+        def _to_grid(lon, lat):
+            gx = int(round((lon - min_lon) / lon_span * (self.world_width - 1)))
+            gy = int(round((max_lat - lat) / lat_span * (self.world_height - 1)))
+            return gx, gy
+
+        HOUSE_RADIUS = 1
+
+        def _set_house(x, y):
+            for dx in range(-HOUSE_RADIUS, HOUSE_RADIUS + 1):
+                for dy in range(-HOUSE_RADIUS, HOUSE_RADIUS + 1):
+                    gx, gy = x + dx, y + dy
+                    if 0 <= gx < self.world_width and 0 <= gy < self.world_height:
+                        for agent in self.model.schedule:
+                            if getattr(agent, "pos", None) == (gx, gy):
+                                if isinstance(agent, PatchAgent) and agent.state != "house":
+                                    agent.state = "house"
+                                    agent.pcolor = 25
+                                break
+
+        for el in data.get("elements", []):
+            geom = el.get("geometry")
+            if not geom:
+                continue
+            for idx, point in enumerate(geom):
+                gp = _to_grid(point["lon"], point["lat"])
+                _set_house(*gp)
+                if idx > 0:
+                    prev = geom[idx - 1]
+                    px, py = _to_grid(prev["lon"], prev["lat"])
+                    gx, gy = gp
+                    dx = gx - px
+                    dy = gy - py
+                    steps = max(abs(dx), abs(dy))
+                    if steps:
+                        for i in range(1, steps):
+                            ix = px + round(dx * i / steps)
+                            iy = py + round(dy * i / steps)
+                            _set_house(ix, iy)
+
+        self.update_grid()
+        self.add_log("🏠 Edifícios do OSM pintados na grelha.")
+
+    # Override para terminar o processo Streamlit ao fechar a aplicação
+    def closeEvent(self, event):
+        if getattr(self, "_geojson_process", None) and self._geojson_process.poll() is None:
+            self._geojson_process.terminate()
+        super().closeEvent(event)
+
+    # --------------------- Visibilidade ---------------------
+    def update_controls_visibility(self):
+        """Mostra/esconde controlos conforme o modo (Simulado vs Real)."""
+        api_mode = self.radio_real_mode.isChecked()
+        self.setup_button.setVisible(not api_mode)
+        self.choose_loc_button.setVisible(api_mode)
+        self.calc_risk_button.setVisible(api_mode)
+
+        # Esconde sliders climáticos em modo API
+        for w in getattr(self, 'climate_widgets', []):
+            w.setVisible(not api_mode)
+
+        # Esconde opções de ambiente (árvores/estrada/rio) em modo API
+        for w in getattr(self, 'env_type_widgets', []):
+            w.setVisible(not api_mode)
+
+    # -------------------- Modelo a partir dos sliders --------------------
+    def _initialize_model_from_current_settings(self):
+        """Cria o EnvironmentModel com os valores atuais dos sliders (usado no modo Real)."""
+        self.add_log("🔧 A criar modelo com parâmetros da API…")
+
+        self.forest_density = self.density_slider.value() / 100.0
+        if self.radio_road_trees.isChecked():
+            chosen_env = "road_trees"
+        elif self.radio_river_trees.isChecked():
+            chosen_env = "river_trees"
+        else:
+            chosen_env = "only_trees"
+
+        # Cria o modelo
+        self.model = EnvironmentModel(
+            self.world_width,
+            self.world_height,
+            density=self.forest_density,
+            env_type=chosen_env,
+            num_firefighters=self.ff_count_slider.value(),
+            water_ratio=self.ff_ratio_slider.value() / 100.0,
+        )
+
+        # Propaga sliders (já podem ter sido alterados pela API)
+        self.model.wind_direction = self.wind_direction_slider.value()
+        self.model.wind_speed = self.wind_speed_slider.value()
+        self.model.rain_level = self.precip_slider.value() / 100.0
+        self.model.humidity = self.humid_slider.value()
+        self.model.temperature = self.temp_slider.value()
+
+        # Limpa e pinta grelha inicial
+        for row in range(self.world_height):
+            for col in range(self.world_width):
+                self.cells[row][col].setBrush(QBrush(QColor("white")))
+
+        self.update_grid()
+
+        self.has_setup = True
+        self.run_button.setEnabled(True)
+        self.end_button.setEnabled(True)
+        self.pause_button.setEnabled(False)
+        self.add_log("✅ Modelo pronto! Use 'Iniciar Simulação'.")
+
+    # -------------------- Encerrar Simulação --------------------
+    def stop_and_show_results(self):
+        """Pára a simulação e exibe os gráficos finais."""
+        if self.timer and self.timer.isActive():
+            self.timer.stop()
+        self.is_paused = False
+        self.run_button.setEnabled(False)
+        self.pause_button.setEnabled(False)
+        self.end_button.setEnabled(False)
+
+        self.add_log("🛑 Simulação encerrada!")
+        self.show_graph_window()
 
 
 def main():

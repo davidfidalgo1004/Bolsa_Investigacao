@@ -1,11 +1,22 @@
 # Standard library imports
 import os
+import sys
+from pathlib import Path
 
 # Third-party imports
 import requests
+import argparse
+import json
 
-# 1. Token do Bearer (recomendado via variável de ambiente)
-TOKEN = os.getenv("WILDFIRE_API_TOKEN", "david")
+# Permite importar o gerador localizado no mesmo diretório
+sys.path.append(str(Path(__file__).resolve().parent))
+
+from geradorAPIs import generate_token
+
+# 1. Token do Bearer (recomendado via variável de ambiente ou gerado automaticamente)
+AUDIENCE = os.getenv("WILDFIRE_API_AUDIENCE", "ken01.utad.pt:8080")
+TOKEN = os.getenv("WILDFIRE_API_TOKEN") or generate_token(AUDIENCE)
+
 HEADERS = {
     "Authorization": f"Bearer {TOKEN}",
     "Content-Type": "application/json",
@@ -70,9 +81,11 @@ def search_records_by_name(name: str):
 
 # 3. Exemplo de utilização
 
-if __name__ == "__main__":
-    # Exemplo GeoJSON
-    geojson = {
+# ---------------- CLI ----------------
+
+def _default_geojson():
+    """GeoJSON pequeno para testes rápidos."""
+    return {
         "type": "FeatureCollection",
         "features": [
             {
@@ -90,21 +103,48 @@ if __name__ == "__main__":
         ]
     }
 
+def main():
+    parser = argparse.ArgumentParser(description="CLI para testar a Wildfire API")
+    parser.add_argument("--geojson", help="Caminho para ficheiro GeoJSON a usar")
+    parser.add_argument("--forecast", type=int, metavar="N", help="Dias de previsão (1-7)")
+    parser.add_argument("--temperature", type=int, help="Temperatura a enviar, se aplicável")
+    parser.add_argument("--humidity", type=int, help="Humidade a enviar, se aplicável")
+    parser.add_argument("--risk-portugal", action="store_true", help="Calcular risco médio de Portugal")
+    parser.add_argument("--list-records", action="store_true", help="Listar registos existentes")
+    args = parser.parse_args()
+
+    # Carregar GeoJSON
+    if args.geojson:
+        try:
+            with open(args.geojson, "r", encoding="utf-8") as f:
+                geojson = json.load(f)
+        except Exception as e:
+            print(f"⚠️ Não foi possível ler '{args.geojson}': {e}")
+            return
+    else:
+        geojson = _default_geojson()
+
     try:
-        print("📍 Risco local:", calculate_risk(geojson, temperature=30, humidity=35))
-        print("📅 Previsão (3 dias):", calculate_forecast(geojson, days=3))
-        print("🇵🇹 Risco Portugal:", calculate_risk_portugal())
-        print("📚 Todos os registos:", get_all_records())
+        # Operações principais
+        if args.forecast:
+            print("📅 Previsão (dias={}):".format(args.forecast),
+                  calculate_forecast(geojson, days=args.forecast))
+        else:
+            extra = {}
+            if args.temperature is not None:
+                extra["temperature"] = args.temperature
+            if args.humidity is not None:
+                extra["humidity"] = args.humidity
+            print("📍 Risco local:", calculate_risk(geojson, **extra))
 
-        records = get_all_records()
-        if records:
-            # Supondo que o primeiro registo tem um campo 'id' em properties
-            first_id = records[0]["properties"].get("id", 1)
-            print("🧾 Registo #:", get_record(first_id))
-            print("✍️ Atualizado:", update_record(first_id, is_wildfire=True))
-            print("🗑️ Apagado:", delete_record(first_id))
+        if args.risk_portugal:
+            print("🇵🇹 Risco Portugal:", calculate_risk_portugal())
 
-        print("🔍 Pesquisa por nome:", search_records_by_name("Gaia"))
+        if args.list_records:
+            print("📚 Todos os registos:", get_all_records())
 
     except requests.HTTPError as err:
         print(f"⚠️ Erro HTTP {err.response.status_code}:", err.response.text)
+
+if __name__ == "__main__":
+    main()
