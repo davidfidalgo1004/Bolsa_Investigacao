@@ -145,3 +145,17 @@ class EnvironmentModel(Model):
             if getattr(agent, "state", None) == "burning":
                 agent.state = "burned"
                 agent.pcolor = 5
+
+    def start_fire_at(self, x: int, y: int):
+        """Inicia fogo exactamente na célula (x,y) se for um patch forestado."""
+        if not (0 <= x < self.world_width and 0 <= y < self.world_height):
+            return False
+        # Encontra o patch nessa posição (pode haver outros agentes)
+        for agent in self.grid.get_cell_list_contents([(x, y)]):
+            if isinstance(agent, PatchAgent) and getattr(agent, "state", None) == "forested":
+                agent.state = "burning"
+                agent.pcolor = 15  # cor de célula em chama
+                if agent.pos not in self.fire_start_iter:
+                    self.fire_start_iter[agent.pos] = getattr(self, "current_iteration", 0)
+                return True
+        return False

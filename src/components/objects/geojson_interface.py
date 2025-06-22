@@ -3,6 +3,8 @@ import streamlit as st
 from streamlit_folium import st_folium
 import folium
 import requests
+from pathlib import Path
+import re
 
 from components.settings.geradorAPIs import generate_token
 
@@ -48,6 +50,34 @@ if drawn_features:
     st.subheader("GeoJSON gerado")
     st.json(geojson)
 
+    # Sugere nome da região e permite escolher pasta
+    default_name = suggest_region_name(geojson)
+    region_name = st.text_input("Nome do ficheiro:", value=default_name)
+    dest_folder = st.text_input("Pasta de destino (servidor)", value="downloads")
+
+    # Função simples de slug
+    def _slug(s):
+        s = re.sub(r"[^A-Za-z0-9_\-]", "_", s)
+        return re.sub(r"_+", "_", s).strip("_") or "area"
+
+    file_name = f"{_slug(region_name)}.geojson"
+    server_path = Path(dest_folder)
+    server_path.mkdir(parents=True, exist_ok=True)
+    full_path = server_path / file_name
+
+    # Botão de download (navegador)
+    st.download_button(
+        label="📥 Download GeoJSON",
+        data=str(geojson).encode("utf-8"),
+        file_name=file_name,
+        mime="application/geo+json",
+    )
+
+    # Guarda também no servidor na pasta escolhida e como 'area.geojson'
+    full_path.write_text(str(geojson), encoding="utf-8")
+    Path("area.geojson").write_text(str(geojson), encoding="utf-8")
+    st.success(f"Arquivo guardado em {full_path}")
+
     if st.button("Calcular risco", type="primary"):
         try:
             resp = requests.post(
@@ -59,4 +89,38 @@ if drawn_features:
         except requests.HTTPError as err:
             st.error(f"Erro {err.response.status_code}: {err.response.text}")
 else:
-    st.info("Desenhe um polígono no mapa para prosseguir.") 
+    st.info("Desenhe um polígono no mapa para prosseguir.")
+
+# -------------------- Helper: Reverse geocode centroid --------------------
+def suggest_region_name(feature_collection):
+    """Returns a place name for the centroid of the first feature using
+    Nominatim. Falls back to 'area' if request fails."""
+    try:
+        import statistics
+
+        # Get first polygon / linestring for centroid
+        coords = []
+        for feat in feature_collection.get("features", []):
+            geom = feat.get("geometry", {})
+            if geom.get("type") == "Polygon":
+                coords.extend(geom.get("coordinates", [[]])[0])
+            elif geom.get("type") == "LineString":
+                coords.extend(geom.get("coordinates", []))
+        if not coords:
+            return "area"
+        lons, lats = zip(*coords)
+        lon = statistics.mean(lons)
+        lat = statistics.mean(lats)
+        resp = requests.get(
+            "https://nominatim.openstreetmap.org/reverse",
+            params={"lat": lat, "lon": lon, "format": "json", "zoom": 10},
+            headers={"User-Agent": "wildfire-sim/1.0"},
+            timeout=10,
+        )
+        if resp.status_code == 200:
+            data = resp.json()
+            display_name = data.get("display_name", "area").split(",")[0]
+            return display_name.replace(" ", "_")
+    except Exception:
+        pass
+    return "area" 

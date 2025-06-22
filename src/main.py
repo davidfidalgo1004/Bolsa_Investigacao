@@ -10,7 +10,7 @@ from components.settings.geradorAPIs import generate_token
 from PySide6.QtWidgets import (
     QApplication, QMainWindow, QWidget, QGridLayout, QHBoxLayout, QVBoxLayout,
     QLabel, QSlider, QPushButton, QTextEdit, QGraphicsScene, QGraphicsView,
-    QFormLayout, QRadioButton, QButtonGroup, QToolTip
+    QFormLayout, QRadioButton, QButtonGroup, QToolTip, QFileDialog
 )
 from PySide6.QtCore import Qt, Slot, QTimer, QEvent
 from PySide6.QtGui import QBrush, QColor, QGuiApplication, QPixmap, QCursor
@@ -61,7 +61,7 @@ class HoverValueSlider(QSlider):
 class SimulationApp(QMainWindow):
     def __init__(self):
         super().__init__()
-        self.setWindowTitle("Simulador de Incêndio – Abordagem Integrada")
+        self.setWindowTitle("Simulador de Incêndio Multi-Agente")
 
         screen = QGuiApplication.primaryScreen()
         geometry = screen.availableGeometry()
@@ -112,6 +112,9 @@ class SimulationApp(QMainWindow):
         self.fireigni = True
 
         self.has_setup = False
+
+        # Caminho escolhido para GeoJSON (default area.geojson)
+        self.selected_geojson_path = Path("area.geojson")
 
         # Layout principal
         central_widget = QWidget()
@@ -379,8 +382,8 @@ class SimulationApp(QMainWindow):
         self.choose_loc_button.clicked.connect(self.choose_location)
         row4.addWidget(self.choose_loc_button)
 
-        self.calc_risk_button = QPushButton("Calcular Risco da Área")
-        self.calc_risk_button.clicked.connect(self.load_area_and_risk)
+        self.calc_risk_button = QPushButton("Ver Locais Disponíveis")
+        self.calc_risk_button.clicked.connect(self.select_existing_location)
         row4.addWidget(self.calc_risk_button)
 
         controls_layout.addLayout(row4)
@@ -389,8 +392,13 @@ class SimulationApp(QMainWindow):
         self.radio_sim_mode.toggled.connect(self.update_controls_visibility)
         self.update_controls_visibility()
 
+    # Utilitário interno para remover emojis (intervalo Unicode 1F300-1FAFF)
+    @staticmethod
+    def _strip_emojis(text: str) -> str:
+        return text.translate({code: None for code in range(0x1F300, 0x1FB00)})
+
     def add_log(self, message: str):
-        self.log_text.append(message)
+        self.log_text.append(self._strip_emojis(message))
 
     def update_firefighter_status_label(self):
         """Atualiza a label com o status atual dos bombeiros."""
@@ -409,7 +417,7 @@ class SimulationApp(QMainWindow):
         bombeiros_tecnico = sum(1 for f in firefighters if f.technique == "alternative")
         
         # Atualiza rótulo de status dos bombeiros
-        status_text = f"Bombeiros (💧{bombeiros_agua} | 🔧{bombeiros_tecnico}) – "
+        status_text = f"Bombeiros (Water {bombeiros_agua} | Tech {bombeiros_tecnico}) – "
         
         if em_ataque > 0:
             status_text += f"Ataque: {em_ataque}, "
@@ -583,10 +591,12 @@ class SimulationApp(QMainWindow):
                 self.model.itsrain_ = True
             else:
                 self.model.itsrain_ = False
-            # Probabilidade de ignição inicial: base 5% ajustada pelo valor de risco da API
+            # Probabilidade de ignição inicial: base 5%
             ignition_prob = 0.05
-            if self.api_risk_value is not None:
-                # Escalona: risco 0 → +0%, risco 1 → +20%
+
+            # Apenas em modo Real (API) utiliza o risco devolvido pela API
+            if self.radio_real_mode.isChecked() and self.api_risk_value is not None:
+                # Escalona: risco 0 → +0%, risco 1 → +20 %
                 ignition_prob += min(max(self.api_risk_value, 0), 1) * 0.20
 
             if random.random() < ignition_prob and self.fireigni==True:
@@ -794,15 +804,6 @@ class SimulationApp(QMainWindow):
             altitude_dialog.setWindowTitle("Mapa de Altitude das Árvores")
             altitude_dialog.show()
 
-        # 5) Gráfico de altura
-        if tree_heights:
-            height_dialog = GraphWindow(
-                tree_heights=tree_heights,
-                parent=self
-            )
-            height_dialog.setWindowTitle("Mapa de Altura das Árvores")
-            height_dialog.show()
-
         # 6) Trajetórias das fragulhas
         if self.model.fragulha_history:
             frag_dialog = FragulhaArrowsWindow(
@@ -864,9 +865,36 @@ class SimulationApp(QMainWindow):
             self.add_log("⚙️ Interface aberta no navegador. Desenhe o polígono e use 'Export' para guardar 'area.geojson'.")
 
     @Slot()
-    def load_area_and_risk(self):
-        """Carrega o ficheiro area.geojson exportado e calcula o risco via API."""
-        area_path = Path("area.geojson")
+    def select_existing_location(self):
+        """Abre um diálogo para escolher um ficheiro .geojson em components/assets/locals.
+        O ficheiro selecionado é copiado para area.geojson e processado."""
+
+        start_dir = Path(__file__).resolve().parent / "components" / "assets" / "locals"
+        if not start_dir.exists():
+            self.add_log("⚠️ Pasta de locais não encontrada.")
+            return
+
+        file_path, _ = QFileDialog.getOpenFileName(
+            self,
+            "Escolher Local",
+            str(start_dir),
+            "GeoJSON (*.geojson)"
+        )
+        if not file_path:
+            return  # cancelado
+
+        try:
+            # Guarde o caminho selecionado
+            self.selected_geojson_path = Path(file_path)
+            self.add_log(f"📂 Local '{self.selected_geojson_path.name}' selecionado.")
+            # Processa diretamente sem copiar
+            self.load_area_and_risk(self.selected_geojson_path)
+        except Exception as e:
+            self.add_log(f"❌ Erro ao processar o local: {e}")
+
+    def load_area_and_risk(self, file_path: Path | None = None):
+        """Carrega o GeoJSON indicado (ou 'area.geojson' por omissão) e calcula o risco via API."""
+        area_path = file_path or self.selected_geojson_path
         if not area_path.exists():
             self.add_log("⚠️ Ficheiro 'area.geojson' não encontrado. Exporte primeiro na interface de mapa.")
             return
@@ -880,6 +908,9 @@ class SimulationApp(QMainWindow):
         result = self._calculate_risk_api(geojson)
         if result is not None:
             self.add_log(f"✅ Resultado do risco: {result}")
+
+            # Analisa latitude do GeoJSON
+            self._analyze_geojson_latitude(geojson)
 
             # Aplica valores climáticos apenas se estiver em Modo Real (API)
             if self.radio_real_mode.isChecked():
@@ -1089,11 +1120,10 @@ class SimulationApp(QMainWindow):
                 for dy in range(-ROAD_RADIUS, ROAD_RADIUS + 1):
                     gx, gy = x + dx, y + dy
                     if 0 <= gx < self.world_width and 0 <= gy < self.world_height:
-                        for agent in self.model.schedule:
-                            if getattr(agent, "pos", None) == (gx, gy):
-                                if isinstance(agent, PatchAgent) and agent.state != "road":
-                                    agent.state = "road"
-                                    agent.pcolor = 85
+                        for agent in self.model.grid.get_cell_list_contents((gx, gy)):
+                            if isinstance(agent, PatchAgent) and agent.state != "road":
+                                agent.state = "road"
+                                agent.pcolor = 85
                                 break
 
         # 2) Varre features LineString / MultiLineString
@@ -1247,11 +1277,10 @@ class SimulationApp(QMainWindow):
                 for dy in range(-HOUSE_RADIUS, HOUSE_RADIUS + 1):
                     gx, gy = x + dx, y + dy
                     if 0 <= gx < self.world_width and 0 <= gy < self.world_height:
-                        for agent in self.model.schedule:
-                            if getattr(agent, "pos", None) == (gx, gy):
-                                if isinstance(agent, PatchAgent) and agent.state != "house":
-                                    agent.state = "house"
-                                    agent.pcolor = 25
+                        for agent in self.model.grid.get_cell_list_contents((gx, gy)):
+                            if isinstance(agent, PatchAgent) and agent.state != "house":
+                                agent.state = "house"
+                                agent.pcolor = 25
                                 break
 
         for el in data.get("elements", []):
@@ -1354,6 +1383,32 @@ class SimulationApp(QMainWindow):
 
         self.add_log("🛑 Simulação encerrada!")
         self.show_graph_window()
+
+    # ------------------- Latitude analysis -------------------
+    def _analyze_geojson_latitude(self, geojson):
+        """Extrai latitudes das coordenadas e regista estatísticas no log."""
+        lats = []
+        for feat in geojson.get("features", []):
+            geom = feat.get("geometry", {})
+            coords = []
+            if geom.get("type") == "Polygon":
+                coords = geom.get("coordinates", [[]])[0]
+            elif geom.get("type") == "LineString":
+                coords = geom.get("coordinates", [])
+            elif geom.get("type") == "MultiPolygon":
+                for poly in geom.get("coordinates", []):
+                    coords.extend(poly[0])
+            elif geom.get("type") == "MultiLineString":
+                for line in geom.get("coordinates", []):
+                    coords.extend(line)
+            lats.extend([lat for _, lat in coords])
+
+        if lats:
+            min_lat = min(lats)
+            max_lat = max(lats)
+            mean_lat = sum(lats) / len(lats)
+            self.add_log(
+                f"📍 Latitude mínima: {min_lat:.4f}, máxima: {max_lat:.4f}, média: {mean_lat:.4f}")
 
 
 def main():

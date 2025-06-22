@@ -1,0 +1,12 @@
+dash>=2.14
+plotly>=5.15
+numpy>=1.23
+mesa>=1.2
+requests>=2.31
+streamlit>=1.25
+dash-leaflet>=1.0 
+shapely>=2.0 
+pillow>=10.0 
+fastapi>=0.105
+uvicorn[standard]>=0.24
+httpx>=0.25 
