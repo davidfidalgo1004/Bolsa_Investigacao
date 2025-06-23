@@ -16,17 +16,14 @@ Bolsa_Investigacao/
 │   │   │   ├── 📄 GraficoAnalise.py # Janelas de gráficos e análises
 │   │   │   └── 📄 bossula.py       # Widget de bússola para direção do vento
 │   │   ├── 📁 settings/            # Configurações e utilitários
-│   │   │   ├── 📄 AlertIncendio.py # Sistema de alertas
 │   │   │   ├── 📄 ProbVento.py     # Cálculos de probabilidade do vento
 │   │   │   └── 📄 MapColor.py      # Mapeamento de cores para visualização
 │   │   └── 📁 assets/              # Recursos visuais (ícones, imagens)
-│   ├── 📁 Tests/                   # Testes automatizados
-│   └── 📁 Netlogo/                 # Comparação com NetLogo (referência)
-├── 📁 Simulações/                   # Resultados de simulações organizados
-│   ├── 📁 Bombeiros_Diretos/       # Simulações com estratégia direta
-│   ├── 📁 Bombeiros_Indiretos/     # Simulações com estratégia indireta
-│   ├── 📁 Bombeiros_Equilibrado/   # Simulações com estratégia equilibrada
-│   └── 📁 [Condições Climáticas]/  # Simulações por tipo de clima
+│   └── 📁 Simulações/                   # Resultados de simulações organizados
+│       ├── 📁 Bombeiros_Diretos/       # Simulações com estratégia direta
+│       ├── 📁 Bombeiros_Indiretos/     # Simulações com estratégia indireta
+│       ├── 📁 Bombeiros_Equilibrado/   # Simulações com estratégia equilibrada
+│       └── 📁 [Condições Climáticas]/  # Simulações por tipo de clima
 └── 📁 Documentação/                # Documentação do projeto
     ├── 📄 Post_Cientifico.pdf      # Artigo científico
     └── 📄 PlanoTrabalho.docx       # Plano de trabalho
@@ -127,7 +124,6 @@ class EnvironmentModel:
 ### **⚙️ Configurações** (`components/settings/`)
 - **MapColor.py**: Sistema de cores para diferentes estados
 - **ProbVento.py**: Cálculos probabilísticos do vento
-- **AlertIncendio.py**: Sistema de alertas e notificações
 
 ## 🔄 Fluxo de Execução
 
@@ -222,7 +218,6 @@ O sistema foi projetado para ser facilmente extensível:
 3. Atualizar interface para nova opção
 
 ## 🧪 Testes e Validação
-
 ### **Estrutura de Testes** (`src/Tests/`)
 - Testes unitários para componentes individuais
 - Validação de comportamentos dos agentes

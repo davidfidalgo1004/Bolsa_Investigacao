@@ -170,7 +170,6 @@ docker run -p 5000:5000 simulador-incendios
 ### 📖 Documentação Técnica
 
 - **[📋 Estrutura do Código](Documentação/ESTRUTURA_CODIGO.md)**: Arquitetura detalhada do sistema
-- **[⏸️ Funcionalidade de Pausa](Documentação/FUNCIONALIDADE_PAUSA.md)**: Controles avançados de simulação
 - **[🔬 Post Científico](Documentação/Post_Cientifico.pdf)**: Post de demonstração
 - **[🔬 Artigo Científico](Documentação/Artigo_Cientifico.pdf)**: Demonstração teórica
 - **[📋 Plano de Trabalho](Documentação/PlanoTrabalho.pdf)**: Metodologia e objetivos
@@ -241,9 +240,7 @@ O projeto inclui cenários pré-definidos na pasta `Simulações/`:
 
 ### 🔬 Validação Científica
 
-- Comparação com simulações NetLogo (pasta `src/Netlogo/`)
-- Validação de comportamentos dos agentes
-- Análise estatística de resultados
+- <!-- linha removida: NetLogo comparisons (módulo arquivado) -->
 
 ---
 
