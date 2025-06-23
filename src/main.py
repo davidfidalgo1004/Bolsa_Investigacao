@@ -30,11 +30,18 @@ BASE_URL = os.getenv("WILDFIRE_API_BASE_URL", "http://ken01.utad.pt:8080")
 AUDIENCE = os.getenv("WILDFIRE_API_AUDIENCE", "ken01.utad.pt:8080")
 TOKEN = os.getenv("WILDFIRE_API_TOKEN") or generate_token(AUDIENCE)
 
+# --- Timeout para pedidos à Wildfire API ---
+# Pode ser definido via variável de ambiente WILDFIRE_API_TIMEOUT (segundos).
+API_TIMEOUT = int(os.getenv("WILDFIRE_API_TIMEOUT", "300"))  # default 300 s (5 min)
+
 HEADERS = {
     "Authorization": f"Bearer {TOKEN}",
     "Content-Type": "application/json",
     "Accept": "application/json",
 }
+
+# Mostra o token no arranque para depuração (remova em produção se necessário)
+print(f"[DEBUG] JWT token usado: {TOKEN}")
 
 class HoverValueSlider(QSlider):
     """
@@ -224,6 +231,10 @@ class SimulationApp(QMainWindow):
         bottom_container.setLayout(bottom_h_layout)
         self.main_layout.addWidget(bottom_container, 2, 0)
 
+        # ---------- Ignicao por Clique ----------
+        # Permite ao utilizador iniciar o fogo clicando na célula desejada
+        self.graphics_view.setMouseTracking(True)
+        self.graphics_view.mousePressEvent = self.handle_view_click
 
     def create_controls_row(self):
         controls_widget = QWidget()
@@ -591,25 +602,9 @@ class SimulationApp(QMainWindow):
                 self.model.itsrain_ = True
             else:
                 self.model.itsrain_ = False
-            # Probabilidade de ignição inicial: base 5%
-            ignition_prob = 0.05
-
-            # Apenas em modo Real (API) utiliza o risco devolvido pela API
-            if self.radio_real_mode.isChecked() and self.api_risk_value is not None:
-                # Escalona: risco 0 → +0%, risco 1 → +20 %
-                ignition_prob += min(max(self.api_risk_value, 0), 1) * 0.20
-
-            if random.random() < ignition_prob and self.fireigni==True:
-                self.fireigni=False
-                forested_patches = [
-                    a for a in self.model.schedule
-                    if getattr(a, "state", None) == "forested"
-                ]
-                if forested_patches:
-                    chosen = random.choice(forested_patches)
-                    chosen.state = "burning"
-                    chosen.pcolor = 15
-                    self.fire_start_positions.append(chosen.pos)
+            # A ignição automática via probabilidade foi desativada.
+            # O utilizador pode agora iniciar o fogo clicando directamente na célula
+            # desejada. Ver método `handle_view_click`.
         
         # Atualiza parâmetros a cada iteração
         self.model.current_iteration = self.current_iteration
@@ -936,7 +931,23 @@ class SimulationApp(QMainWindow):
     def _calculate_risk_api(self, geojson, **params):
         """Wrapper para chamar o endpoint /calculate-risk/."""
         try:
-            resp = requests.post(f"{BASE_URL}/calculate-risk/", headers=HEADERS, params=params, json=geojson, timeout=30)
+            # --- DEBUG: mostra tamanho do payload e alguns cabeçalhos ---
+            if params.get("debug"):
+                self.add_log(
+                    f"➡️ POST {BASE_URL}/calculate-risk/ (payload {len(json.dumps(geojson))} bytes)"
+                )
+                self.add_log(f" Token: {TOKEN}")
+
+            # Também imprime na consola sempre que é feita a requisição
+            print(f"[DEBUG] Enviando requisição com token: {TOKEN}")
+
+            resp = requests.post(
+                f"{BASE_URL}/calculate-risk/",
+                headers=HEADERS,
+                params={k: v for k, v in params.items() if k != "debug"},
+                json=geojson,
+                timeout=(10, API_TIMEOUT)  # 10 s ligação, API_TIMEOUT leitura
+            )
             resp.raise_for_status()
             return resp.json()
         except requests.HTTPError as err:
@@ -1409,6 +1420,17 @@ class SimulationApp(QMainWindow):
             mean_lat = sum(lats) / len(lats)
             self.add_log(
                 f"📍 Latitude mínima: {min_lat:.4f}, máxima: {max_lat:.4f}, média: {mean_lat:.4f}")
+
+    def handle_view_click(self, event):
+        if event.button() == Qt.LeftButton:
+            pos = self.graphics_view.mapToScene(event.pos())
+            x = int(pos.x() / self.cell_size)
+            y = int(pos.y() / self.cell_size)
+            if 0 <= x < self.world_width and 0 <= y < self.world_height:
+                if self.model.start_fire_at(x, y):
+                    self.fire_start_positions.append((x, y))
+                    self.add_log(f"🔥 Fogo iniciado em ({x}, {y}) via clique")
+                    self.update_grid()
 
 
 def main():

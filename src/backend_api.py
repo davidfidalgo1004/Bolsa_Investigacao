@@ -37,6 +37,7 @@ from pydantic import BaseModel
 # --- Importa lógica do simulador ---
 from Environment.ambiente import EnvironmentModel
 from components.settings.MapColor import EncontrarCor
+from Agents.firefighter_agent import FirefighterAgent  # utilizado em ff_evo
 
 # ---------- Config constantes ----------
 WORLD_W = 125
@@ -253,8 +254,26 @@ async def api_setup(req: DensityReq):
     STATE.setup_model(density=req.density)
     burned = 0
     forested = sum(1 for a in STATE.model.schedule if getattr(a, "state", None) == "forested") if STATE.model else 0
+    air = STATE.model.air_agent if STATE.model else None
+    pol = {"co": air.co_level if air else None,
+           "co2": air.co2_level if air else None,
+           "pm25": air.pm2_5_level if air else None,
+           "pm10": air.pm10_level if air else None,
+           "o2": air.o2_level if air else None}
     img_url, bounds = STATE.grid_to_png_image()
-    return {"status": "ok", "bounds": bounds, "img": img_url, "burned": burned, "forested": forested}
+    return {"status": "ok", "bounds": bounds, "img": img_url, "burned": burned, "forested": forested, "pollutants": pol,
+            "temperature": STATE.model.temperature if STATE.model else None,
+            "humidity": STATE.model.humidity if STATE.model else None,
+            "precipitation": STATE.model.rain_level if STATE.model else None,
+            "ff_evo": {
+                "tick": 0,
+                "attack": 0,
+                "firebreak": 0,
+                "moving": 0,
+                "idle": len([a for a in STATE.model.schedule if isinstance(a, FirefighterAgent)]) if STATE.model else 0,
+                "water": len([a for a in STATE.model.schedule if isinstance(a, FirefighterAgent) and a.technique=='water']) if STATE.model else 0,
+                "tech": len([a for a in STATE.model.schedule if isinstance(a, FirefighterAgent) and a.technique=='alternative']) if STATE.model else 0,
+            }}
 
 
 @app.post("/region")
@@ -337,6 +356,9 @@ async def sim_loop():
     while True:
         if STATE.running and STATE.model:
             STATE.step()
+            if STATE.iteration >= STATE.total_iters:
+                STATE.running = False
+                STATE.iteration = 0  # reset para nova execução
             burned = STATE.burned[-1] if STATE.burned else 0
             forested = STATE.forested[-1] if STATE.forested else 0
             img_url, bounds = STATE.grid_to_png_image()
@@ -345,10 +367,17 @@ async def sim_loop():
             wind_dir = getattr(STATE.model, "wind_direction", None)
             wind_speed = getattr(STATE.model, "wind_speed", None)
             humidity = getattr(STATE.model, "humidity", None)
+            air = STATE.model.air_agent
+            pollutants = {
+                "co": air.co_level,
+                "co2": air.co2_level,
+                "pm25": air.pm2_5_level,
+                "pm10": air.pm10_level,
+                "o2": air.o2_level,
+            }
 
             # Contagem de bombeiros por modo / técnica
             try:
-                from Agents.firefighter_agent import FirefighterAgent
                 firefighters = [a for a in STATE.model.schedule if isinstance(a, FirefighterAgent)]
                 ff_counts = {
                     "direct_attack": sum(1 for f in firefighters if f.mode == "direct_attack"),
@@ -363,6 +392,16 @@ async def sim_loop():
             except Exception:
                 ff_counts = {}
 
+            ff_evo = {
+                "tick": STATE.iteration,
+                "attack": ff_counts["direct_attack"],
+                "firebreak": ff_counts["firebreak"],
+                "moving": ff_counts["navigating"],
+                "idle": ff_counts["idle"],
+                "water": ff_counts["water"],
+                "tech": ff_counts["alternative"],
+            }
+
             await manager.broadcast({
                 "tick": STATE.iteration,
                 "burned": burned,
@@ -374,7 +413,10 @@ async def sim_loop():
                     "wind_direction": wind_dir,
                     "wind_speed": wind_speed,
                     "humidity": humidity,
+                    "precipitation": getattr(STATE.model, "rain_level", None),
+                    "pollutants": pollutants,
                     "firefighters": ff_counts,
+                    "ff_evo": ff_evo,
                 },
             })
         await asyncio.sleep(STEP_DELAY)

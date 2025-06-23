@@ -41,13 +41,19 @@ export default function App() {
   const [ffCount, setFfCount] = useState(4);
   const [ffRatio, setFfRatio] = useState(50);
 
-  const [burnData, setBurnData] = useState([]); // evolução
+  const [burnData, setBurnData] = useState([]);
+  const [airData,setAirData]=useState([]); // {tick,co,co2,pm25,pm10,o2}
+  const [climateData,setClimateData]=useState([]); // {tick,temp,humid,precip}
+  const [ffData,setFfData]=useState([]);
   const [running, setRunning] = useState(false);
   const [imgUrl, setImgUrl] = useState(null);
   const [bounds, setBounds] = useState([-9.56, -6.18, 36.96, 42.18]); // default PT
   const [stats, setStats] = useState({});
   const [regionJson, setRegionJson] = useState(null);
   const [sidebarOpen, setSidebarOpen] = useState(false);
+
+  // chart selection state
+  const [chartTab,setChartTab]=useState('fire');
 
   // ---------------- WebSocket ----------------
   const connectWS = () => {
@@ -63,6 +69,12 @@ export default function App() {
       if (data.img) setImgUrl(data.img);
       if (data.bounds) setBounds(data.bounds);
       if (data.stats) setStats(data.stats);
+      if(data.stats?.pollutants){
+        const p=data.stats.pollutants;
+        setAirData(prev=>[...prev,{tick:data.tick,...p}]);
+      }
+      if(data.stats?.ff_evo){ setFfData(prev=>[...prev,data.stats.ff_evo]); }
+      setClimateData(prev=>[...prev,{tick:data.tick,temp:data.stats?.temperature,humid:data.stats?.humidity,precip:data.stats?.precipitation}]);
       addLog(`Iteração ${data.tick} | Queimadas: ${data.burned}, Florestadas: ${data.forested}`);
     };
 
@@ -80,6 +92,12 @@ export default function App() {
       if (resp.data?.img) setImgUrl(resp.data.img);
       if (resp.data) {
         setBurnData([{ tick: 0, burned: resp.data.burned ?? 0, forested: resp.data.forested ?? 0 }]);
+        if(resp.data.pollutants){
+          const p=resp.data.pollutants;
+          setAirData([{tick:0,...p}]);
+        }
+        if(resp.data.ff_evo){ setFfData([resp.data.ff_evo]); }
+        setClimateData([{tick:0,temp:resp.data.temperature,humid:resp.data.humidity,precip:resp.data.precipitation}]);
       }
       addLog('Modelo criado / cenário pronto.');
     } catch (err) {
@@ -243,15 +261,80 @@ export default function App() {
 
       {/* ---------- Graph ---------- */}
       <div className="graph-pane">
-        <LineChart width={600} height={200} data={burnData}>
-          <CartesianGrid strokeDasharray="3 3" />
-          <XAxis dataKey="tick" />
-          <YAxis />
-          <Tooltip />
-          <Legend />
-          <Line type="monotone" dataKey="burned" stroke="#ff4500" name="Queimadas" />
-          <Line type="monotone" dataKey="forested" stroke="#228B22" name="Florestadas" />
-        </LineChart>
+        <div style={{marginBottom:'6px'}}>
+          <button onClick={()=>setChartTab('monitor')} disabled={chartTab==='monitor'}>Monitor</button>
+          <button onClick={()=>setChartTab('fire')} disabled={chartTab==='fire'}>Incêndio</button>
+          <button onClick={()=>setChartTab('air')} disabled={chartTab==='air'}>Qualidade Ar</button>
+          <button onClick={()=>setChartTab('climate')} disabled={chartTab==='climate'}>Clima</button>
+          <button onClick={()=>setChartTab('ff')} disabled={chartTab==='ff'}>Bombeiros</button>
+        </div>
+        {chartTab==='monitor' && (
+          <div style={{display:'flex',gap:'20px',flexWrap:'wrap',color:'#9acd32'}}>
+            <div className="compass">
+              <div className="compass-arrow" style={{transform:`translateX(-50%) rotate(${stats.wind_direction ?? 0}deg)`}} />
+            </div>
+            <div className="monitor-pane" style={{border:'none'}}>
+              <div><span>Temp:</span> {stats.temperature?.toFixed?.(1) ?? '--'} °C</div>
+              <div><span>Humidade:</span> {stats.humidity?.toFixed?.(1) ?? '--'} %</div>
+              <div><span>Precip.:</span> {stats.precipitation!=null ? (stats.precipitation*100).toFixed(0) : '--'} %</div>
+              <div><span>Vento:</span> {stats.wind_speed?.toFixed?.(1) ?? '--'} m/s @ {stats.wind_direction?.toFixed?.(0) ?? '--'}°</div>
+              {stats.pollutants && (
+                <>
+                  <div><span>CO:</span> {stats.pollutants.co?.toFixed?.(2) ?? '--'} ppm</div>
+                  <div><span>CO₂:</span> {stats.pollutants.co2?.toFixed?.(2) ?? '--'} ppm</div>
+                  <div><span>PM2.5:</span> {stats.pollutants.pm25?.toFixed?.(1) ?? '--'} µg/m³</div>
+                  <div><span>PM10:</span> {stats.pollutants.pm10?.toFixed?.(1) ?? '--'} µg/m³</div>
+                  <div><span>O₂:</span> {stats.pollutants.o2?.toFixed?.(2) ?? '--'} ppm</div>
+                </>
+              )}
+            </div>
+          </div>) }
+        {chartTab==='fire' && (
+          <LineChart width={600} height={200} data={burnData}>
+            <CartesianGrid strokeDasharray="3 3" />
+            <XAxis dataKey="tick" />
+            <YAxis />
+            <Tooltip />
+            <Legend />
+            <Line type="monotone" dataKey="burned" stroke="#ff4500" name="Queimadas" />
+            <Line type="monotone" dataKey="forested" stroke="#228B22" name="Florestadas" />
+          </LineChart>) }
+        {chartTab==='air' && (
+          <LineChart width={600} height={200} data={airData}>
+            <CartesianGrid strokeDasharray="3 3" />
+            <XAxis dataKey="tick" />
+            <YAxis />
+            <Tooltip />
+            <Legend />
+            <Line type="monotone" dataKey="co" stroke="#ff00ff" name="CO (ppm)" />
+            <Line type="monotone" dataKey="co2" stroke="#00ffff" name="CO₂ (ppm)" />
+            <Line type="monotone" dataKey="pm25" stroke="#ffa500" name="PM2.5" />
+            <Line type="monotone" dataKey="pm10" stroke="#9370db" name="PM10" />
+            <Line type="monotone" dataKey="o2" stroke="#00ff00" name="O₂ (ppm)" />
+          </LineChart>) }
+        {chartTab==='climate' && (
+          <LineChart width={600} height={200} data={climateData}>
+            <CartesianGrid strokeDasharray="3 3" />
+            <XAxis dataKey="tick" />
+            <YAxis />
+            <Tooltip />
+            <Legend />
+            <Line type="monotone" dataKey="temp" stroke="#ff0000" name="Temperatura (°C)" />
+            <Line type="monotone" dataKey="humid" stroke="#1e90ff" name="Humidade (%)" />
+            <Line type="monotone" dataKey="precip" stroke="#2e8b57" name="Precipitação (%)" />
+          </LineChart>) }
+        {chartTab==='ff' && (
+          <LineChart width={600} height={200} data={ffData}>
+            <CartesianGrid strokeDasharray="3 3" />
+            <XAxis dataKey="tick" />
+            <YAxis />
+            <Tooltip />
+            <Legend />
+            <Line dataKey="attack" stroke="#ff4500" name="Ataque" />
+            <Line dataKey="firebreak" stroke="#ffa500" name="Firebreak" />
+            <Line dataKey="moving" stroke="#00bfff" name="Movendo" />
+            <Line dataKey="idle" stroke="#cccccc" name="Ociosos" />
+          </LineChart>)}
       </div>
 
       {/* Sidebar Drawer */}
