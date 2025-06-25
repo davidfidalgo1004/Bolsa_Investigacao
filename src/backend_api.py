@@ -198,6 +198,28 @@ class SimState:
         b64 = base64.b64encode(buf.getvalue()).decode()
         return f"data:image/png;base64,{b64}", bounds
 
+    # ---------- Reset Forest ----------
+    def reset_forest(self):
+        """Define todos os PatchAgent como 'forested' e limpa métricas.
+
+        Mantém o modelo e a região seleccionada, mas remove quaisquer áreas
+        queimadas/danificadas para que o utilizador possa recomeçar a
+        simulação sem carregar novo GeoJSON."""
+        if not self.model:
+            return False
+        from Agents.agentes import PatchAgent
+        for agent in self.model.schedule:
+            if isinstance(agent, PatchAgent):
+                agent.state = "forested"
+                agent.pcolor = 55
+                agent.burn_time = None
+        # Limpa séries temporais
+        self.burned.clear()
+        self.forested.clear()
+        self.timesteps.clear()
+        self.iteration = 0
+        return True
+
 
 STATE = SimState()
 
@@ -433,4 +455,14 @@ async def startup_event():
 if __name__ == "__main__":
     import uvicorn
 
-    uvicorn.run("backend_api:app", host="0.0.0.0", port=8000, reload=True) 
+    uvicorn.run("backend_api:app", host="0.0.0.0", port=8000, reload=True)
+
+# ------------- Reset Endpoint -------------
+@app.post("/reset")
+async def api_reset():
+    """Reseta o estado do ambiente, removendo áreas ardidas/danificadas."""
+    success = STATE.reset_forest()
+    if not success:
+        raise HTTPException(400, "Modelo não configurado – execute /setup primeiro.")
+    img_url, bounds = STATE.grid_to_png_image()
+    return {"status": "ok", "img": img_url, "bounds": bounds} 

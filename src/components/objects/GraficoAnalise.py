@@ -427,3 +427,37 @@ class FirebreakMapWindow(BaseGraphWindow):
         
         # Adiciona botões de download
         self.add_download_buttons(layout)
+
+
+# -------------------- Novo: RiskMapWindow --------------------
+class RiskMapWindow(BaseGraphWindow):
+    """Exibe o mapa de risco (valor numérico por célula)."""
+
+    def __init__(self, risk_values, parent=None):
+        super().__init__(parent)
+        self.setWindowTitle("Mapa de Risco por Célula")
+
+        layout = QVBoxLayout()
+        self.setLayout(layout)
+
+        self.fig = Figure(figsize=(6, 4), dpi=100)
+        self.canvas = FigureCanvas(self.fig)
+        self.axes = self.fig.add_subplot(111)
+        layout.addWidget(self.canvas)
+
+        x, y, risks = zip(*risk_values)
+        scatter = self.axes.scatter(x, y, c=risks, cmap='RdYlGn_r', marker='s')
+        self.fig.colorbar(scatter, ax=self.axes, label="Risco (0-1)")
+        self.axes.set_xlabel("Posição X")
+        self.axes.set_ylabel("Posição Y")
+        self.axes.set_title("Distribuição de Risco por Patch")
+
+        # CSV ready
+        self.data_for_csv = {
+            'Posicao_X': x,
+            'Posicao_Y': y,
+            'Risco': risks
+        }
+
+        self.canvas.draw()
+        self.add_download_buttons(layout)

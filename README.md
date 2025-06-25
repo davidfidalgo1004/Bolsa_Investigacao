@@ -36,6 +36,7 @@ Este simulador de incêndios florestais utiliza **inteligência artificial multi
 - **Python 3.8+** instalado no sistema
 - **pip** (gestor de pacotes Python)
 - **Git** (para clonar o repositório)
+- **Node.js 16+** (para build e execução do front-end React)
 
 ### 🔧 Passo a Passo
 
@@ -123,6 +124,25 @@ docker run -p 5000:5000 simulador-incendios
 - **Condições Climáticas**: Temperatura, humidade, precipitação
 - **Trajetórias**: Movimento de fagulhas e bombeiros
 - **Mapas Estratégicos**: Pontos de início e linhas de corte
+
+### 🌐 Interface Web (FastAPI + React)
+
+1. **Inicie a API backend** (FastAPI):
+   ```bash
+   cd src
+   python -m uvicorn backend_api:app --reload --port 8000
+   ```
+
+2. **Arranque o front-end** (React Vite):
+   ```bash
+   cd frontend
+   npm install        # apenas na primeira execução
+   npm run dev        # inicia Vite em http://localhost:5173
+   ```
+
+3. **Use no browser**: aceda a `http://localhost:5173` ‑ os controlos da aplicação consomem a API em `http://localhost:8000`.
+
+> A interface web liga-se ao WebSocket `/ws` da API para receber imagens e métricas em tempo-real.
 
 ---
 

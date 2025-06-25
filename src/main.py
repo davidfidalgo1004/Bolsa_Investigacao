@@ -22,7 +22,7 @@ from Agents.firefighter_agent import FirefighterAgent
 from components.settings.MapColor import EncontrarCor
 from components.objects.GraficoAnalise import (
     GraphWindow, FragulhaArrowsWindow, FireStartWindow, 
-    FirebreakMapWindow, plot_trajectories
+    FirebreakMapWindow, plot_trajectories, RiskMapWindow
 )
 
 # ------------- Wildfire API Config -------------
@@ -190,9 +190,22 @@ class SimulationApp(QMainWindow):
                 row_items.append(rect)
             self.cells.append(row_items)
 
-        self.add_log("Interface pronta. Ajuste as configurações e clique em 'Setup'.")
         self.monitor_label = QLabel("Parâmetros: Temp: -- °C, Ar: --")
         self.bottom_left_layout.addWidget(self.monitor_label)
+
+        # ---------------- Local de simulação ----------------
+        self.location_name = "--"  # actualizado quando o utilizador escolhe área
+
+        def _update_monitor_label():
+            """Actualiza texto do monitor com localização, temperatura e ar."""
+            temp_txt = f"{getattr(self.model, 'temperature', '--'):.1f}" if hasattr(self, 'model') else "--"
+            air = getattr(self.model.air_agent, 'get_air_status', lambda: '--')() if hasattr(self.model, 'air_agent') else "--"
+            self.monitor_label.setText(
+                f"Local: {self.location_name} | Temp: {temp_txt} °C, Ar: {air}"
+            )
+
+        # Guarda no atributo para ser usado noutros métodos
+        self._update_monitor_label = _update_monitor_label
 
         self.monitors_widget = QWidget()
         monitors_layout = QFormLayout(self.monitors_widget)
@@ -397,6 +410,11 @@ class SimulationApp(QMainWindow):
         self.calc_risk_button.clicked.connect(self.select_existing_location)
         row4.addWidget(self.calc_risk_button)
 
+        # Botão para resetar ambiente
+        self.reset_button = QPushButton("Reset Ambiente")
+        self.reset_button.clicked.connect(self.reset_environment)
+        row4.addWidget(self.reset_button)
+
         controls_layout.addLayout(row4)
 
         # Actualiza visibilidade conforme modo inicial
@@ -513,7 +531,7 @@ class SimulationApp(QMainWindow):
         air_agent = self.model.air_agent
         air_status = air_agent.get_air_status()
         self.monitor_label.setText(
-            f"Parâmetros: Temp: {self.model.temperature:.1f} °C, Ar: {air_status}"
+            f"Local: {self.location_name} | Temp: {self.model.temperature:.1f} °C, Ar: {air_status}"
         )
         self.fire_status_label.setText(
             f"Incêndio: {'ATIVO' if self.model.temperature > 35 or air_status == 'Perigo' else 'Inativo'} "
@@ -549,6 +567,14 @@ class SimulationApp(QMainWindow):
         self.pause_button.setText("Pausar")
         self.pause_button.setEnabled(False)
 
+        # (Re)aplica altitude agora que o modelo existe
+        try:
+            self._apply_altitude_to_model(result)
+            # Aplica land cover para todos os modos
+            self._apply_land_cover_to_model(result)
+            self._apply_risk_to_model(result)
+        except Exception as e:
+            self.add_log(f"⚠️ Erro ao aplicar altitude: {e}")
 
     @Slot()
     def run_simulation(self):
@@ -619,7 +645,7 @@ class SimulationApp(QMainWindow):
         air_agent = self.model.air_agent
         air_status = air_agent.get_air_status()
         self.monitor_label.setText(
-            f"Parâmetros: Temp: {self.model.temperature:.1f} °C, Ar: {air_status}"
+            f"Local: {self.location_name} | Temp: {self.model.temperature:.1f} °C, Ar: {air_status}"
         )
         self.fire_status_label.setText(
             f"Incêndio: {'ATIVO' if self.model.temperature > 35 or air_status == 'Perigo' else 'Inativo'} "
@@ -799,6 +825,11 @@ class SimulationApp(QMainWindow):
             altitude_dialog.setWindowTitle("Mapa de Altitude das Árvores")
             altitude_dialog.show()
 
+        # 5) Mapa de risco
+        if getattr(self, "risk_values", None):
+            risk_dialog = RiskMapWindow(self.risk_values, parent=self)
+            risk_dialog.show()
+
         # 6) Trajetórias das fragulhas
         if self.model.fragulha_history:
             frag_dialog = FragulhaArrowsWindow(
@@ -858,6 +889,10 @@ class SimulationApp(QMainWindow):
         if getattr(self, "_geojson_process", None):
             webbrowser.open("http://localhost:8501", new=2)
             self.add_log("⚙️ Interface aberta no navegador. Desenhe o polígono e use 'Export' para guardar 'area.geojson'.")
+            # Actualiza nome do local para monitor
+            self.location_name = self.selected_geojson_path.stem
+            if hasattr(self, "_update_monitor_label"):
+                self._update_monitor_label()
 
     @Slot()
     def select_existing_location(self):
@@ -899,6 +934,11 @@ class SimulationApp(QMainWindow):
             self.add_log(f"⚠️ Erro ao ler 'area.geojson': {e}")
             return
 
+        # Actualiza nome do local baseado no ficheiro
+        self.location_name = area_path.stem
+        if hasattr(self, "_update_monitor_label"):
+            self._update_monitor_label()
+
         self.add_log("🔎 A calcular risco da área selecionada…")
         result = self._calculate_risk_api(geojson)
         if result is not None:
@@ -914,6 +954,15 @@ class SimulationApp(QMainWindow):
             # Se ainda não houver modelo criado em modo Real, cria-o agora
             if not self.has_setup:
                 self._initialize_model_from_current_settings()
+
+            # (Re)aplica altitude agora que o modelo existe
+            try:
+                self._apply_altitude_to_model(result)
+                # Aplica land cover para todos os modos
+                self._apply_land_cover_to_model(result)
+                self._apply_risk_to_model(result)
+            except Exception as e:
+                self.add_log(f"⚠️ Erro ao aplicar altitude: {e}")
 
             # Desenha estradas (se houver)
             try:
@@ -967,7 +1016,7 @@ class SimulationApp(QMainWindow):
         # --- Extracção dos valores das propriedades ---
         keys_of_interest = [
             "temperature", "humidity", "precipitation",
-            "wind_speed", "wind_direction"
+            "wind_speed", "wind_direction", "altitude"
         ]
 
         agg = {k: [] for k in keys_of_interest}
@@ -988,6 +1037,9 @@ class SimulationApp(QMainWindow):
             return sum(values) / len(values) if values else None
 
         averaged = {k: _mean(v) for k, v in agg.items()}
+
+        # Executa aplicação de altitude
+        self._apply_altitude_to_model(result)
 
         # --- Sincroniza sliders ---
         def _set_slider(slider, value, minimum=None, maximum=None):
@@ -1065,6 +1117,163 @@ class SimulationApp(QMainWindow):
 
         # Guarda o valor de risco global para lógica de ignição
         self.api_risk_value = highest_val if highest_val >= 0 else None
+
+    # ------------------------------------------------------------------
+    # Altitude – aplica valores às células
+    # ------------------------------------------------------------------
+    def _apply_altitude_to_model(self, api_result):
+        """Actualiza o atributo altitude de cada PatchAgent usando os valores
+        de altitude (ou elevation) devolvidos pela API no GeoJSON de resposta.
+
+        A API pode devolver uma ou mais features com a chave 'altitude' ou
+        'elevation'. Para cada feature percorremos o grid e atribuímos o valor
+        às posições cujo ponto lon/lat pertença à geometria (usa Shapely se
+        disponível; caso contrário faz teste pelo bounding-box).
+        """
+        if not (self.has_setup and self.model):
+            return
+
+        # Garante que temos features
+        features = []
+        if isinstance(api_result, dict):
+            features = api_result.get("features", [])
+        if not features:
+            return
+
+        # Bounding box global do conjunto (para acelerar conversões)
+        all_coords = []
+        for feat in features:
+            geom = feat.get("geometry", {})
+            gtype = geom.get("type")
+            if gtype == "Polygon":
+                all_coords.extend(geom.get("coordinates", [[]])[0])
+            elif gtype == "MultiPolygon":
+                for poly in geom.get("coordinates", []):
+                    all_coords.extend(poly[0])
+        if not all_coords:
+            return
+
+        lons, lats = zip(*all_coords)
+        min_lon, max_lon = min(lons), max(lons)
+        min_lat, max_lat = min(lats), max(lats)
+        lon_span = max_lon - min_lon or 1e-9
+        lat_span = max_lat - min_lat or 1e-9
+
+        # Conversão grid→lon/lat
+        def _grid_to_lon_lat(x: int, y: int):
+            lon = min_lon + (x / (self.world_width - 1)) * lon_span
+            lat = max_lat - (y / (self.world_height - 1)) * lat_span
+            return lon, lat
+
+        # Tenta usar shapely para teste preciso
+        try:
+            from shapely.geometry import shape as _shape, Point as _Point
+            shapely_ok = True
+        except Exception:
+            shapely_ok = False
+
+        # Para cada feature que contenha altitude/elevation
+        altitude_vals = []
+        assigned_positions = set()
+        for feat in features:
+            props = feat.get("properties", {})
+            alt_val = props.get("altitude", props.get("elevation"))
+            if alt_val is None:
+                continue
+            altitude_vals.append(alt_val)
+            geom = feat.get("geometry", {})
+            if shapely_ok:
+                try:
+                    shp = _shape(geom)
+                except Exception:
+                    shp = None
+            else:
+                shp = None
+
+            # Bounding box da feature para limitar varredura
+            coords_feat = []
+            gtype = geom.get("type")
+            if gtype == "Polygon":
+                coords_feat = geom.get("coordinates", [])[0]
+            elif gtype == "MultiPolygon":
+                for poly in geom.get("coordinates", []):
+                    coords_feat.extend(poly[0])
+            if not coords_feat:
+                continue
+            flons, flats = zip(*coords_feat)
+            fmin_lon, fmax_lon = min(flons), max(flons)
+            fmin_lat, fmax_lat = min(flats), max(flats)
+            xmin = int(round((fmin_lon - min_lon) / lon_span * (self.world_width - 1)))
+            xmax = int(round((fmax_lon - min_lon) / lon_span * (self.world_width - 1)))
+            ymin = int(round((max_lat - fmax_lat) / lat_span * (self.world_height - 1)))
+            ymax = int(round((max_lat - fmin_lat) / lat_span * (self.world_height - 1)))
+            xmin, xmax = max(0, xmin), min(self.world_width - 1, xmax)
+            ymin, ymax = max(0, ymin), min(self.world_height - 1, ymax)
+
+            for x in range(xmin, xmax + 1):
+                for y in range(ymin, ymax + 1):
+                    lon, lat = _grid_to_lon_lat(x, y)
+                    inside = False
+                    if shp is not None:
+                        # Constrói bounding box da célula (simplificação rectangular)
+                        lon_step = lon_span / self.world_width
+                        lat_step = lat_span / self.world_height
+                        cell_poly = _shape({
+                            "type": "Polygon",
+                            "coordinates": [[
+                                [lon - lon_step / 2, lat - lat_step / 2],
+                                [lon + lon_step / 2, lat - lat_step / 2],
+                                [lon + lon_step / 2, lat + lat_step / 2],
+                                [lon - lon_step / 2, lat + lat_step / 2],
+                                [lon - lon_step / 2, lat - lat_step / 2]
+                            ]]
+                        })
+                        inside = shp.intersects(cell_poly)
+                    else:
+                        inside = fmin_lon <= lon <= fmax_lon and fmin_lat <= lat <= fmax_lat
+                    if inside:
+                        for agent in self.model.grid.get_cell_list_contents((x, y)):
+                            if hasattr(agent, "altitude"):
+                                agent.altitude = alt_val
+                                assigned_positions.add((x, y))
+                                break
+
+        # ----------------- Aproximação para patches não atribuídos -----------------
+        if assigned_positions:
+            max_radius = 20  # expande gradualmente até cobrir grelha inteira
+            for agent in self.model.schedule:
+                if not hasattr(agent, "altitude"):
+                    continue
+                if agent.pos in assigned_positions:
+                    continue  # já tem altitude da API
+
+                x0, y0 = agent.pos
+                neighbour_vals = []
+                neighbour_dists = []
+                for r in range(1, max_radius + 1):
+                    for dx in range(-r, r + 1):
+                        for dy in range(-r, r + 1):
+                            if abs(dx) != r and abs(dy) != r:
+                                continue  # apenas borda
+                            nx, ny = x0 + dx, y0 + dy
+                            if (nx, ny) in assigned_positions and 0 <= nx < self.world_width and 0 <= ny < self.world_height:
+                                for p in self.model.grid.get_cell_list_contents((nx, ny)):
+                                    if hasattr(p, "altitude"):
+                                        neighbour_vals.append(p.altitude)
+                                        neighbour_dists.append(max(1, abs(dx) + abs(dy)))
+                                        break
+                    if neighbour_vals:
+                        break
+                if neighbour_vals:
+                    # Peso inversamente proporcional à distância
+                    weights = [1 / d for d in neighbour_dists]
+                    agent.altitude = sum(v * w for v, w in zip(neighbour_vals, weights)) / sum(weights)
+
+        # ----------------- Resumo -----------------
+        if altitude_vals:
+            self.add_log(f"🏔️ Altitude aplicada por zonas a {len(altitude_vals)} features da API.")
+        else:
+            self.add_log("⚠️ Nenhum valor de altitude encontrado nas features.")
 
     # ------------------------------------------------------------------
     # GeoJSON → Estradas na grelha
@@ -1339,6 +1548,9 @@ class SimulationApp(QMainWindow):
         for w in getattr(self, 'env_type_widgets', []):
             w.setVisible(not api_mode)
 
+        # Mostra botão reset apenas em Modo API
+        self.reset_button.setVisible(api_mode)
+
     # -------------------- Modelo a partir dos sliders --------------------
     def _initialize_model_from_current_settings(self):
         """Cria o EnvironmentModel com os valores atuais dos sliders (usado no modo Real)."""
@@ -1431,6 +1643,301 @@ class SimulationApp(QMainWindow):
                     self.fire_start_positions.append((x, y))
                     self.add_log(f"🔥 Fogo iniciado em ({x}, {y}) via clique")
                     self.update_grid()
+
+    def reset_environment(self):
+        """Limpa células queimadas/dangered e reinicia métricas locais."""
+        if not hasattr(self, "model") or self.model is None:
+            self.add_log("⚠️ Modelo ainda não iniciado.")
+            return
+        from Agents.agentes import PatchAgent
+        for agent in self.model.schedule:
+            if isinstance(agent, PatchAgent):
+                # Restaura estado capturado se existir
+                if hasattr(agent, "initial_state") and hasattr(agent, "initial_pcolor"):
+                    agent.state = agent.initial_state
+                    agent.pcolor = agent.initial_pcolor
+                else:
+                    agent.state = "forested"
+                    agent.pcolor = 55
+                agent.burn_time = None
+
+    # ------------------------------------------------------------------
+    # Land cover & Forest density
+    # ------------------------------------------------------------------
+    def _apply_land_cover_to_model(self, api_result):
+        """Define estado dos patches (floresta/areal/etc.) conforme land_cover e
+        forest_density vindos da API. Se forest_density <1, ajusta número de
+        patches florestados aleatoriamente para reflectir densidade."""
+
+        if not (self.has_setup and self.model):
+            return
+
+        # Garante shapely para teste de ponto no polígono
+        try:
+            from shapely.geometry import shape as _shape, Point as _Point
+            shapely_ok = True
+        except Exception:
+            shapely_ok = False
+
+        features = api_result.get("features", []) if isinstance(api_result, dict) else []
+        if not features:
+            return
+
+        # Reutiliza bounding box global para grid→lon/lat
+        all_coords = []
+        for feat in features:
+            geom = feat.get("geometry", {})
+            gtype = geom.get("type")
+            if gtype == "Polygon":
+                all_coords.extend(geom.get("coordinates", [[]])[0])
+            elif gtype == "MultiPolygon":
+                for poly in geom.get("coordinates", []):
+                    all_coords.extend(poly[0])
+        if not all_coords:
+            return
+
+        lons, lats = zip(*all_coords)
+        min_lon, max_lon = min(lons), max(lons)
+        min_lat, max_lat = min(lats), max(lats)
+        lon_span = max_lon - min_lon or 1e-9
+        lat_span = max_lat - min_lat or 1e-9
+
+        def _grid_to_lon_lat(x: int, y: int):
+            lon = min_lon + (x / (self.world_width - 1)) * lon_span
+            lat = max_lat - (y / (self.world_height - 1)) * lat_span
+            return lon, lat
+
+        changes = 0
+        for feat in features:
+            props = feat.get("properties", {})
+            # ------------------ Inferir cobertura do solo ------------------
+            land_cover = None
+            for key in ("land_cover", "landcover", "landuse", "natural", "surface", "cover", "class", "type"):
+                if key in props and props[key] is not None:
+                    land_cover = str(props[key]).lower()
+                    break
+
+            # Se não vier etiqueta, infere usando NDVI
+            ndvi_val = props.get("ndvi")
+            if land_cover is None and ndvi_val is not None:
+                try:
+                    ndvi_f = float(ndvi_val)
+                    if ndvi_f < 0.25:
+                        land_cover = "sand"  # solo exposto / areal
+                    elif ndvi_f > 0.35:
+                        land_cover = "forest"
+                    else:
+                        land_cover = "mixed"
+                except Exception:
+                    pass
+
+            # Densidade florestal – se não existir, aproxima via NDVI
+            forest_density = props.get("forest_density", props.get("forestDensity"))
+            if forest_density is None and land_cover == "forest" and ndvi_val is not None:
+                try:
+                    ndvi_f = float(ndvi_val)
+                    forest_density = max(0.1, min(1.0, (ndvi_f - 0.25) / 0.55))
+                except Exception:
+                    forest_density = 1.0
+
+            # Distância à estrada (m)
+            road_dist = props.get("distance_to_closest_road")
+
+            # Se nada relevante, continua
+            if land_cover is None and forest_density is None:
+                continue
+
+            geom = feat.get("geometry", {})
+            if shapely_ok:
+                try:
+                    shp = _shape(geom)
+                except Exception:
+                    shp = None
+            else:
+                shp = None
+
+            # Bounding box da feature
+            coords_feat = []
+            gtype = geom.get("type")
+            if gtype == "Polygon":
+                coords_feat = geom.get("coordinates", [[]])[0]
+            elif gtype == "MultiPolygon":
+                for poly in geom.get("coordinates", []):
+                    coords_feat.extend(poly[0])
+            if not coords_feat:
+                continue
+
+            flons, flats = zip(*coords_feat)
+            fmin_lon, fmax_lon = min(flons), max(flons)
+            fmin_lat, fmax_lat = min(flats), max(flats)
+
+            xmin = int(round((fmin_lon - min_lon) / lon_span * (self.world_width - 1)))
+            xmax = int(round((fmax_lon - min_lon) / lon_span * (self.world_width - 1)))
+            ymin = int(round((max_lat - fmax_lat) / lat_span * (self.world_height - 1)))
+            ymax = int(round((max_lat - fmin_lat) / lat_span * (self.world_height - 1)))
+            xmin, xmax = max(0, xmin), min(self.world_width - 1, xmax)
+            ymin, ymax = max(0, ymin), min(self.world_height - 1, ymax)
+
+            for x in range(xmin, xmax + 1):
+                for y in range(ymin, ymax + 1):
+                    lon, lat = _grid_to_lon_lat(x, y)
+                    inside = False
+                    if shp is not None:
+                        # Constrói bounding box da célula (simplificação rectangular)
+                        lon_step = lon_span / self.world_width
+                        lat_step = lat_span / self.world_height
+                        cell_poly = _shape({
+                            "type": "Polygon",
+                            "coordinates": [[
+                                [lon - lon_step / 2, lat - lat_step / 2],
+                                [lon + lon_step / 2, lat - lat_step / 2],
+                                [lon + lon_step / 2, lat + lat_step / 2],
+                                [lon - lon_step / 2, lat + lat_step / 2],
+                                [lon - lon_step / 2, lat - lat_step / 2]
+                            ]]
+                        })
+                        inside = shp.intersects(cell_poly)
+                    else:
+                        inside = fmin_lon <= lon <= fmax_lon and fmin_lat <= lat <= fmax_lat
+                    if not inside:
+                        continue
+
+                    patches = self.model.grid.get_cell_list_contents((x, y))
+                    for patch in patches:
+                        # Apenas PatchAgent
+                        if not hasattr(patch, "state"):
+                            continue
+
+                        # --- Classificação: primeiro areia, depois floresta, por fim estrada
+                        if land_cover in ("sand", "areal", "bare", "beach", "dune"):
+                            patch.state = "empty"
+                            patch.pcolor = 165  # cor de areal
+                            changes += 1
+                        elif land_cover in ("forest", "wood", "tree") or forest_density is not None:
+                            # Garantir estado forestado de acordo com densidade
+                            if forest_density is None:
+                                forest_density = 1.0
+                            if patch.state == "empty" and random.random() < forest_density:
+                                patch.state = "forested"
+                                patch.tree_type = "pine"
+                                patch.pcolor = 55
+                                changes += 1
+                            elif patch.state == "forested" and random.random() > forest_density:
+                                patch.state = "empty"
+                                patch.pcolor = 0
+                                changes += 1
+                        else:
+                            # Por fim estrada se realmente muito próximo
+                            is_road = False
+                            if road_dist is not None:
+                                try:
+                                    is_road = float(road_dist) < 3.0  # <3 m
+                                except Exception:
+                                    pass
+                            if is_road:
+                                patch.state = "road"
+                                patch.pcolor = 85
+                                changes += 1
+
+        if changes:
+            self.add_log(f"🌲 Cobertura do solo/densidade aplicada a {changes} patches.")
+
+        # Guarda fotografia do estado inicial após aplicar cobertura
+        self._snapshot_initial_state()
+
+    # ------------------------------------------------------------------
+    def _snapshot_initial_state(self):
+        """Grava o estado original (state, pcolor) de cada PatchAgent para poder fazer reset."""
+        from Agents.agentes import PatchAgent
+        for agent in self.model.schedule:
+            if isinstance(agent, PatchAgent):
+                agent.initial_state = agent.state
+                agent.initial_pcolor = agent.pcolor
+
+    # ------------------------------------------------------------------
+    def _apply_risk_to_model(self, api_result):
+        """Atribui risk_value a cada PatchAgent conforme feature da API."""
+        if not (self.has_setup and self.model):
+            return
+        features = api_result.get("features", []) if isinstance(api_result, dict) else []
+        if not features:
+            return
+        try:
+            from shapely.geometry import shape as _shape, Point as _Point
+            shapely_ok = True
+        except Exception:
+            shapely_ok = False
+
+        # prepara matrix risks list
+        self.risk_values = []
+
+        # Bounding box for conversion
+        coords_all = []
+        for feat in features:
+            geom = feat.get("geometry", {})
+            if geom.get("type") == "Polygon":
+                coords_all.extend(geom.get("coordinates", [[]])[0])
+            elif geom.get("type") == "MultiPolygon":
+                for poly in geom.get("coordinates", []):
+                    coords_all.extend(poly[0])
+        if not coords_all:
+            return
+        lons,lats = zip(*coords_all)
+        min_lon,max_lon = min(lons), max(lons)
+        min_lat,max_lat = min(lats), max(lats)
+        lon_span = max_lon - min_lon or 1e-9
+        lat_span = max_lat - min_lat or 1e-9
+
+        def _grid_to_lon_lat(x,y):
+            lon = min_lon + (x/(self.world_width-1))*lon_span
+            lat = max_lat - (y/(self.world_height-1))*lat_span
+            return lon,lat
+
+        # assign default None
+        for agent in self.model.schedule:
+            if hasattr(agent,"risk_value"):
+                agent.risk_value = None
+
+        for feat in features:
+            rv = feat.get("properties",{}).get("risk_value")
+            if rv is None:
+                continue
+            geom=feat.get("geometry",{})
+            shp=_shape(geom) if shapely_ok else None
+            # bounding box local
+            coords_feat = []
+            if geom.get("type") == "Polygon":
+                coords_feat = geom.get("coordinates", [[]])[0]
+            elif geom.get("type") == "MultiPolygon":
+                for poly in geom.get("coordinates", []):
+                    coords_feat.extend(poly[0])
+            if not coords_feat:
+                continue
+            flons,flats = zip(*coords_feat)
+            fmin_lon,fmax_lon = min(flons), max(flons)
+            fmin_lat,fmax_lat = min(flats), max(flats)
+            xmin = int(round((fmin_lon - min_lon)/lon_span*(self.world_width-1)))
+            xmax = int(round((fmax_lon - min_lon)/lon_span*(self.world_width-1)))
+            ymin = int(round((max_lat - fmax_lat)/lat_span*(self.world_height-1)))
+            ymax = int(round((max_lat - fmin_lat)/lat_span*(self.world_height-1)))
+            xmin,xmax = max(0,xmin), min(self.world_width-1,xmax)
+            ymin,ymax = max(0,ymin), min(self.world_height-1,ymax)
+            for x in range(xmin,xmax+1):
+                for y in range(ymin,ymax+1):
+                    lon,lat=_grid_to_lon_lat(x,y)
+                    inside=False
+                    if shp is not None:
+                        inside = shp.contains(_Point(lon,lat))
+                    else:
+                        inside = fmin_lon<=lon<=fmax_lon and fmin_lat<=lat<=fmax_lat
+                    if inside:
+                        for p in self.model.grid.get_cell_list_contents((x,y)):
+                            p.risk_value = rv
+
+        # Collect list
+        for agent in self.model.schedule:
+            if hasattr(agent,"risk_value") and agent.risk_value is not None:
+                self.risk_values.append((agent.pos[0], agent.pos[1], agent.risk_value))
 
 
 def main():

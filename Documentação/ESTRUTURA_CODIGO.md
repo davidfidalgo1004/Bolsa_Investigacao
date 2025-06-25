@@ -6,6 +6,7 @@
 Bolsa_Investigacao/
 ├── 📁 src/                           # Código principal da aplicação
 │   ├── 📄 main.py                   # Ponto de entrada - Interface gráfica principal
+│   ├── 📄 backend_api.py          # API FastAPI (REST + WebSocket)
 │   ├── 📁 Agents/                   # Agentes inteligentes do sistema
 │   │   ├── 📄 agentes.py           # Agentes de ar e patches do terreno
 │   │   └── 📄 firefighter_agent.py # Agentes bombeiros com diferentes técnicas
@@ -27,6 +28,10 @@ Bolsa_Investigacao/
 └── 📁 Documentação/                # Documentação do projeto
     ├── 📄 Post_Cientifico.pdf      # Artigo científico
     └── 📄 PlanoTrabalho.docx       # Plano de trabalho
+├── 📁 frontend/                    # Interface Web React
+│   ├── 📄 package.json             # Dependências e scripts
+│   ├── 📄 vite.config.js           # Configuração Vite
+│   └── 📁 src/                     # Componentes React
 ```
 
 ## 🏗️ Arquitetura do Sistema

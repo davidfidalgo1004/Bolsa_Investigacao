@@ -20,7 +20,7 @@ HEADERS = {
 }
 
 st.set_page_config(page_title="Wildfire Risk", layout="wide")
-st.title("🔶 Desenhar Área & Calcular Risco de Incêndio")
+st.title(" Desenhar Área & Calcular Risco de Incêndio")
 
 with st.expander("Instruções", expanded=True):
     st.markdown(
@@ -30,9 +30,60 @@ with st.expander("Instruções", expanded=True):
         "4. Clique em **Submit** para enviar e calcular o risco."
     )
 
+# -------------------- NEW: Pesquisar por coordenadas --------------------
+# Guarda centro padrão na sessão se ainda não existir
+if "center" not in st.session_state:
+    st.session_state["center"] = [39.5, -8.0]
+
+with st.expander("Pesquisar por coordenadas"):
+    col_lat, col_lon, col_btn = st.columns([1, 1, 1])
+    with col_lat:
+        lat_val = st.number_input(
+            "Latitude",
+            value=st.session_state["center"][0],
+            format="%.6f",
+            key="lat_input",
+        )
+    with col_lon:
+        lon_val = st.number_input(
+            "Longitude",
+            value=st.session_state["center"][1],
+            format="%.6f",
+            key="lon_input",
+        )
+    with col_btn:
+        if st.button("Ir para localização", type="primary"):
+            st.session_state["center"] = [lat_val, lon_val]
+
+center = st.session_state["center"]
+
 # Folium map
-m = folium.Map(location=[39.5, -8.0], zoom_start=6, control_scale=True)
+m = folium.Map(location=center, zoom_start=6, control_scale=True)
+# Adiciona marcador caso o utilizador tenha pesquisado coordenadas
+if center != [39.5, -8.0]:
+    folium.Marker(
+        location=center,
+        tooltip="Coordenadas pesquisadas",
+        icon=folium.Icon(color="red", icon="search"),
+    ).add_to(m)
+
+# Camadas de fundo para melhor interpretação do terreno
 folium.TileLayer("OpenStreetMap", name="Mapa base").add_to(m)
+folium.TileLayer(
+    tiles="Stamen Terrain",
+    attr="Map tiles by Stamen Design, CC BY 3.0 — Map data © OpenStreetMap contributors",
+    name="Terreno",
+).add_to(m)
+folium.TileLayer(
+    tiles="https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}",
+    attr="Esri",
+    name="Satélite (Esri)",
+    overlay=False,
+    control=True,
+).add_to(m)
+
+# Controlos de camadas
+folium.LayerControl(position="topright", collapsed=False).add_to(m)
 
 # Add draw plugin
 from folium.plugins import Draw
@@ -84,7 +135,7 @@ if drawn_features:
                 f"{BASE_URL}/calculate-risk/", headers=HEADERS, json=geojson
             )
             resp.raise_for_status()
-            st.success("✅ Risco calculado com sucesso")
+            st.success(" Risco calculado com sucesso")
             st.json(resp.json())
         except requests.HTTPError as err:
             st.error(f"Erro {err.response.status_code}: {err.response.text}")

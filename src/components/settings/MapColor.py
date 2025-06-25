@@ -28,5 +28,7 @@ def EncontrarCor(pcolor_value):
 
     elif pcolor_value == 105:
         return "#2c34b4"
+    elif pcolor_value == 165:
+        return "#F4A460"   # Areal / Sand color
     else:
         return "#000000"   # Preto
