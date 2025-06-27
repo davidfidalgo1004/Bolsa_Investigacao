@@ -26,7 +26,7 @@ class FragulhaAgent(Agent):
         """Calcula a nova posição da fagulha baseada no vento."""
         ox, oy = self.origin_pos
         angle = math.radians(self.model.wind_direction)
-        dist = random.uniform(2, 6) * max(self.model.wind_speed, 1)
+        dist = random.uniform(1, 4) * max(self.model.wind_speed, 1)
         dx = int(round(math.sin(angle) * dist))
         dy = int(round(-math.cos(angle) * dist))
         nx = min(max(ox + dx, 0), self.model.world_width - 1)
@@ -133,9 +133,9 @@ class PatchAgent(Agent):
             if self.burn_time is None:
                 # Define tempo de queima baseado no tipo
                 if self.tree_type == "eucalyptus":
-                    self.burn_time = random.randint(2, 4)
+                    self.burn_time = random.randint(10, 12)
                 else:
-                    self.burn_time = random.randint(4, 6)
+                    self.burn_time = random.randint(15, 17)
                 self.pcolor = 15
 
             raio = 1 + round(self.model.wind_speed / 10)
@@ -196,7 +196,7 @@ class PatchAgent(Agent):
                             + wind_factor
                             + temperatura_factor
                         )
-                        final_prob = base_prob * combined_factor * self.factor_type_tree
+                        final_prob = 0.5*(base_prob * combined_factor * self.factor_type_tree)
 
                         patches = self.model.grid.get_cell_list_contents((x, y))
                         for patch in patches:
@@ -210,7 +210,7 @@ class PatchAgent(Agent):
                                     patch.pcolor = 45
 
             # Chance de gerar nova fagulha
-            if random.random() < 0.20:
+            if random.random() < 0.03:
                 new_f = FragulhaAgent(
                     self.model.agent_id_counter,
                     self.model,

@@ -25,6 +25,9 @@ from components.objects.GraficoAnalise import (
     FirebreakMapWindow, plot_trajectories, RiskMapWindow
 )
 
+# Adicione o import do pyproj no topo do arquivo
+from pyproj import Transformer
+
 # ------------- Wildfire API Config -------------
 BASE_URL = os.getenv("WILDFIRE_API_BASE_URL", "http://ken01.utad.pt:8080")
 AUDIENCE = os.getenv("WILDFIRE_API_AUDIENCE", "ken01.utad.pt:8080")
@@ -302,7 +305,7 @@ class SimulationApp(QMainWindow):
         self.pause_button.setEnabled(False)  # Desabilitado inicialmente
         row1.addWidget(self.pause_button)
 
-        self.step_button = QPushButton("Próximo Passo")
+        self.step_button = QPushButton("Próximos 15min")
         self.step_button.clicked.connect(self.single_step)
         row1.addWidget(self.step_button)
 
@@ -386,8 +389,8 @@ class SimulationApp(QMainWindow):
         ff_count_label = QLabel("Número de Bombeiros:")
         row3.addWidget(ff_count_label)
         self.ff_count_slider = HoverValueSlider(Qt.Horizontal)
-        self.ff_count_slider.setRange(4, 120)
-        self.ff_count_slider.setValue(4)  # valor inicial padrão
+        self.ff_count_slider.setRange(0, 120)
+        self.ff_count_slider.setValue(0)  # valor inicial padrão
         row3.addWidget(self.ff_count_slider)
         # Slider para proporção de jatos de água
         ff_ratio_label = QLabel("Tecnicistas | Apagadores (%)")
@@ -628,11 +631,9 @@ class SimulationApp(QMainWindow):
                 self.model.itsrain_ = True
             else:
                 self.model.itsrain_ = False
-            # A ignição automática via probabilidade foi desativada.
-            # O utilizador pode agora iniciar o fogo clicando directamente na célula
-            # desejada. Ver método `handle_view_click`.
+ 
         
-        # Atualiza parâmetros a cada iteração
+   
         self.model.current_iteration = self.current_iteration
         self.model.wind_direction = (self.model.wind_direction + random.uniform(-1, 1)) % 360
         self.model.wind_speed = max(self.model.wind_speed + random.uniform(-0.3, 0.3), 0)
@@ -684,7 +685,7 @@ class SimulationApp(QMainWindow):
         self.precip_evol.append(self.model.rain_level)
 
         self.add_log(
-            f"Iteração {self.current_iteration} | Queimadas: {burned}, Florestadas: {forested}"
+            f"Minuto {self.current_iteration} | Queimadas: {burned}, Florestadas: {forested}"
         )
         # Atualiza label dos bombeiros
         self.update_firefighter_status_label()
@@ -709,16 +710,17 @@ class SimulationApp(QMainWindow):
     @Slot()
     def single_step(self):
         """Executa um único passo da simulação."""
-        if self.current_iteration >= self.total_iterations:
-            self.add_log("Simulação já finalizada! Use 'Setup' para reiniciar.")
-            return
-            
-        # Se a simulação estiver executando, pause primeiro
-        if self.timer and self.timer.isActive():
-            self.pause_simulation()
-            
-        self.add_log(f"🔄 Executando passo único: {self.current_iteration + 1}")
-        self.simulation_step()
+        for i in range(15):
+            if self.current_iteration >= self.total_iterations:
+                self.add_log("Simulação já finalizada! Use 'Setup' para reiniciar.")
+                return
+                
+            # Se a simulação estiver executando, pause primeiro
+            if self.timer and self.timer.isActive():
+                self.pause_simulation()
+                
+            self.add_log(f"🔄 Executando passo único: {self.current_iteration + 1}")
+            self.simulation_step()
 
     @Slot()
     def stop_fire(self):
@@ -778,88 +780,88 @@ class SimulationApp(QMainWindow):
             (agent.pos[0], agent.pos[1], agent.altitude)
             for agent in self.model.schedule if hasattr(agent, "altitude")
         ]
+        if 0:
+            # 1) Evolução do incêndio
+            if self.burned_area_evol or self.forested_area_evol or self.timesteps:
+                burn_dialog = GraphWindow(
+                    burned_data=self.burned_area_evol,
+                    forested_data=self.forested_area_evol,
+                    timesteps=self.timesteps,
+                    parent=self
+                )
+                burn_dialog.setWindowTitle("Evolução de Árvores Queimadas vs Florestadas")
+                burn_dialog.show()
 
-        # 1) Evolução do incêndio
-        if self.burned_area_evol or self.forested_area_evol or self.timesteps:
-            burn_dialog = GraphWindow(
-                burned_data=self.burned_area_evol,
-                forested_data=self.forested_area_evol,
-                timesteps=self.timesteps,
-                parent=self
-            )
-            burn_dialog.setWindowTitle("Evolução de Árvores Queimadas vs Florestadas")
-            burn_dialog.show()
+            # 2) Gráfico do ar
+            if self%_.air_co_evol:
+                air_dialog = GraphWindow(
+                    air_co_evol=self.air_co_evol,
+                    air_co2_evol=self.air_co2_evol,
+                    air_pm25_evol=self.air_pm25_evol,
+                    air_pm10_evol=self.air_pm10_evol,
+                    air_o2_evol=self.air_o2_evol,
+                    timesteps=self.timesteps,
+                    parent=self
+                )
+                air_dialog.setWindowTitle("Evolução dos Poluentes e Oxigênio no Ar")
+                air_dialog.show()
 
-        # 2) Gráfico do ar
-        if self.air_co_evol:
-            air_dialog = GraphWindow(
-                air_co_evol=self.air_co_evol,
-                air_co2_evol=self.air_co2_evol,
-                air_pm25_evol=self.air_pm25_evol,
-                air_pm10_evol=self.air_pm10_evol,
-                air_o2_evol=self.air_o2_evol,
-                timesteps=self.timesteps,
-                parent=self
-            )
-            air_dialog.setWindowTitle("Evolução dos Poluentes e Oxigênio no Ar")
-            air_dialog.show()
+            # 3) Gráfico de clima (temp, hum, precip)
+            if self.temp_evol:
+                climate_dialog = GraphWindow(
+                    temperatura_evol=self.temp_evol,
+                    humidade_evol=self.humid_evol,
+                    precipitacao_evol=self.precip_evol,
+                    timesteps=self.timesteps,
+                    parent=self
+                )
+                climate_dialog.setWindowTitle("Evolução de Temperatura, Humidade e Precipitação")
+                climate_dialog.show()
 
-        # 3) Gráfico de clima (temp, hum, precip)
-        if self.temp_evol:
-            climate_dialog = GraphWindow(
-                temperatura_evol=self.temp_evol,
-                humidade_evol=self.humid_evol,
-                precipitacao_evol=self.precip_evol,
-                timesteps=self.timesteps,
-                parent=self
-            )
-            climate_dialog.setWindowTitle("Evolução de Temperatura, Humidade e Precipitação")
-            climate_dialog.show()
+            # 4) Gráfico de altitude
+            if tree_altitudes:
+                altitude_dialog = GraphWindow(
+                    tree_altitudes=tree_altitudes,
+                    parent=self
+                )
+                altitude_dialog.setWindowTitle("Mapa de Altitude das Árvores")
+                altitude_dialog.show()
 
-        # 4) Gráfico de altitude
-        if tree_altitudes:
-            altitude_dialog = GraphWindow(
-                tree_altitudes=tree_altitudes,
-                parent=self
-            )
-            altitude_dialog.setWindowTitle("Mapa de Altitude das Árvores")
-            altitude_dialog.show()
+            # 5) Mapa de risco
+            if getattr(self, "risk_values", None):
+                risk_dialog = RiskMapWindow(self.risk_values, parent=self)
+                risk_dialog.show()
 
-        # 5) Mapa de risco
-        if getattr(self, "risk_values", None):
-            risk_dialog = RiskMapWindow(self.risk_values, parent=self)
-            risk_dialog.show()
+            # 6) Trajetórias das fragulhas
+            if self.model.fragulha_history:
+                frag_dialog = FragulhaArrowsWindow(
+                    self.model.fragulha_history,
+                    parent=self
+                )
+                frag_dialog.setWindowTitle("Trajetórias Detalhadas das Fragulhas")
+                frag_dialog.show()
 
-        # 6) Trajetórias das fragulhas
-        if self.model.fragulha_history:
-            frag_dialog = FragulhaArrowsWindow(
-                self.model.fragulha_history,
-                parent=self
-            )
-            frag_dialog.setWindowTitle("Trajetórias Detalhadas das Fragulhas")
-            frag_dialog.show()
+            # 7) Pontos de início do incêndio
+            if self.fire_start_positions:
+                fire_dialog = FireStartWindow(
+                    self.fire_start_positions,
+                    self.world_width,
+                    self.world_height,
+                    parent=self
+                )
+                fire_dialog.setWindowTitle("Pontos de Início do Incêndio")
+                fire_dialog.show()
 
-        # 7) Pontos de início do incêndio
-        if self.fire_start_positions:
-            fire_dialog = FireStartWindow(
-                self.fire_start_positions,
-                self.world_width,
-                self.world_height,
-                parent=self
-            )
-            fire_dialog.setWindowTitle("Pontos de Início do Incêndio")
-            fire_dialog.show()
-
-        # 8) Mapa de linhas de corte
-        if hasattr(self.model, 'firebreak_history') and self.model.firebreak_history:
-            firebreak_dialog = FirebreakMapWindow(
-                self.model.firebreak_history,
-                self.world_width,
-                self.world_height,
-                parent=self
-            )
-            firebreak_dialog.setWindowTitle("Mapa de Linhas de Corte")
-            firebreak_dialog.show()
+            # 8) Mapa de linhas de corte
+            if hasattr(self.model, 'firebreak_history') and self.model.firebreak_history:
+                firebreak_dialog = FirebreakMapWindow(
+                    self.model.firebreak_history,
+                    self.world_width,
+                    self.world_height,
+                    parent=self
+                )
+                firebreak_dialog.setWindowTitle("Mapa de Linhas de Corte")
+                firebreak_dialog.show()
 
         # ---------------- GeoJSON / API Risco ----------------
     
@@ -923,6 +925,7 @@ class SimulationApp(QMainWindow):
             self.add_log(f"❌ Erro ao processar o local: {e}")
 
     def load_area_and_risk(self, file_path: Path | None = None):
+        self.add_log("[DEBUG] Entrou no método load_area_and_risk")
         """Carrega o GeoJSON indicado (ou 'area.geojson' por omissão) e calcula o risco via API."""
         area_path = file_path or self.selected_geojson_path
         if not area_path.exists():
@@ -976,6 +979,31 @@ class SimulationApp(QMainWindow):
                 self._fetch_and_draw_osm_buildings(geojson)
             except Exception as e:
                 self.add_log(f"⚠️ Overpass falhou: {e}")
+
+        # --- Botões de ignição especiais para @Coimbr_o_1.geojson ---
+        self.add_log(f"[DEBUG] Ficheiro selecionado: {self.selected_geojson_path.name}")
+        if self.selected_geojson_path.name.lstrip('@') == "Coimbr_o_1.geojson":
+            self.add_log("[DEBUG] Entrou no bloco de botões especiais.")
+            pontoA, pontoB = self._read_leiriaarder_points()
+            self.add_log(f"[DEBUG] PontoA: {pontoA}, PontoB: {pontoB}")
+            if pontoA and pontoB:
+                # Remova botões antigos se já existirem
+                if hasattr(self, "ignite_buttons"):
+                    for btn in self.ignite_buttons:
+                        btn.setParent(None)
+                self.ignite_buttons = []
+                btnA = QPushButton("Meter a arder no Ponto A")
+                btnB = QPushButton("Meter a arder no Ponto B")
+                btnA.clicked.connect(lambda: self.ignite_at_point(*pontoA))
+                btnB.clicked.connect(lambda: self.ignite_at_point(*pontoB))
+                self.bottom_left_layout.addWidget(btnA)
+                self.bottom_left_layout.addWidget(btnB)
+                self.ignite_buttons.extend([btnA, btnB])
+                self.add_log("🟠 Botões de ignição para Ponto A e B adicionados.")
+            else:
+                self.add_log("[DEBUG] Não foi possível ler os pontos de ignição.")
+        else:
+            self.add_log("[DEBUG] Ficheiro não é @Coimbr_o_1.geojson, não mostra botões.")
 
     def _calculate_risk_api(self, geojson, **params):
         """Wrapper para chamar o endpoint /calculate-risk/."""
@@ -1122,25 +1150,17 @@ class SimulationApp(QMainWindow):
     # Altitude – aplica valores às células
     # ------------------------------------------------------------------
     def _apply_altitude_to_model(self, api_result):
-        """Actualiza o atributo altitude de cada PatchAgent usando os valores
-        de altitude (ou elevation) devolvidos pela API no GeoJSON de resposta.
-
-        A API pode devolver uma ou mais features com a chave 'altitude' ou
-        'elevation'. Para cada feature percorremos o grid e atribuímos o valor
-        às posições cujo ponto lon/lat pertença à geometria (usa Shapely se
-        disponível; caso contrário faz teste pelo bounding-box).
-        """
         if not (self.has_setup and self.model):
             return
-
-        # Garante que temos features
-        features = []
-        if isinstance(api_result, dict):
-            features = api_result.get("features", [])
+        try:
+            from shapely.geometry import shape as _shape, Point as _Point
+            shapely_ok = True
+        except Exception:
+            self.add_log("⚠️ Shapely não está instalado. Recomendo instalar para melhor precisão.")
+            shapely_ok = False
+        features = api_result.get("features", []) if isinstance(api_result, dict) else []
         if not features:
             return
-
-        # Bounding box global do conjunto (para acelerar conversões)
         all_coords = []
         for feat in features:
             geom = feat.get("geometry", {})
@@ -1152,27 +1172,21 @@ class SimulationApp(QMainWindow):
                     all_coords.extend(poly[0])
         if not all_coords:
             return
-
         lons, lats = zip(*all_coords)
-        min_lon, max_lon = min(lons), max(lons)
-        min_lat, max_lat = min(lats), max(lats)
-        lon_span = max_lon - min_lon or 1e-9
-        lat_span = max_lat - min_lat or 1e-9
-
-        # Conversão grid→lon/lat
-        def _grid_to_lon_lat(x: int, y: int):
-            lon = min_lon + (x / (self.world_width - 1)) * lon_span
-            lat = max_lat - (y / (self.world_height - 1)) * lat_span
-            return lon, lat
-
-        # Tenta usar shapely para teste preciso
-        try:
-            from shapely.geometry import shape as _shape, Point as _Point
-            shapely_ok = True
-        except Exception:
-            shapely_ok = False
-
-        # Para cada feature que contenha altitude/elevation
+        xs, ys, transformer = self._project_coords(lons, lats)
+        min_x, max_x = min(xs), max(xs)
+        min_y, max_y = min(ys), max(ys)
+        padding = 0.05
+        x_span = max_x - min_x
+        y_span = max_y - min_y
+        min_x_p = min_x - x_span * padding
+        max_x_p = max_x + x_span * padding
+        min_y_p = min_y - y_span * padding
+        max_y_p = max_y + y_span * padding
+        def _grid_to_xy(x: int, y: int):
+            px = min_x_p + (x / (self.world_width - 1)) * (max_x_p - min_x_p)
+            py = max_y_p - (y / (self.world_height - 1)) * (max_y_p - min_y_p)
+            return px, py
         altitude_vals = []
         assigned_positions = set()
         for feat in features:
@@ -1185,68 +1199,55 @@ class SimulationApp(QMainWindow):
             if shapely_ok:
                 try:
                     shp = _shape(geom)
+                    # Projete o polígono para UTM
+                    if hasattr(shp, 'geoms'):
+                        shp_proj = type(shp)([[_Point(*transformer.transform(lon, lat)) for lon, lat in poly.exterior.coords] for poly in shp.geoms])
+                    else:
+                        shp_proj = type(shp)([(_Point(*transformer.transform(lon, lat))) for lon, lat in shp.exterior.coords])
                 except Exception:
-                    shp = None
+                    shp_proj = None
             else:
-                shp = None
-
-            # Bounding box da feature para limitar varredura
+                shp_proj = None
             coords_feat = []
             gtype = geom.get("type")
             if gtype == "Polygon":
-                coords_feat = geom.get("coordinates", [])[0]
+                coords_feat = geom.get("coordinates", [[]])[0]
             elif gtype == "MultiPolygon":
                 for poly in geom.get("coordinates", []):
                     coords_feat.extend(poly[0])
             if not coords_feat:
                 continue
-            flons, flats = zip(*coords_feat)
-            fmin_lon, fmax_lon = min(flons), max(flons)
-            fmin_lat, fmax_lat = min(flats), max(flats)
-            xmin = int(round((fmin_lon - min_lon) / lon_span * (self.world_width - 1)))
-            xmax = int(round((fmax_lon - min_lon) / lon_span * (self.world_width - 1)))
-            ymin = int(round((max_lat - fmax_lat) / lat_span * (self.world_height - 1)))
-            ymax = int(round((max_lat - fmin_lat) / lat_span * (self.world_height - 1)))
+            feat_lons, feat_lats = zip(*coords_feat)
+            feat_xs, feat_ys, _ = self._project_coords(feat_lons, feat_lats)
+            fmin_x, fmax_x = min(feat_xs), max(feat_xs)
+            fmin_y, fmax_y = min(feat_ys), max(feat_ys)
+            xmin = int(round((fmin_x - min_x_p) / (max_x_p - min_x_p) * (self.world_width - 1)))
+            xmax = int(round((fmax_x - min_x_p) / (max_x_p - min_x_p) * (self.world_width - 1)))
+            ymin = int(round((max_y_p - fmax_y) / (max_y_p - min_y_p) * (self.world_height - 1)))
+            ymax = int(round((max_y_p - fmin_y) / (max_y_p - min_y_p) * (self.world_height - 1)))
             xmin, xmax = max(0, xmin), min(self.world_width - 1, xmax)
             ymin, ymax = max(0, ymin), min(self.world_height - 1, ymax)
-
             for x in range(xmin, xmax + 1):
                 for y in range(ymin, ymax + 1):
-                    lon, lat = _grid_to_lon_lat(x, y)
+                    px, py = _grid_to_xy(x, y)
                     inside = False
-                    if shp is not None:
-                        # Constrói bounding box da célula (simplificação rectangular)
-                        lon_step = lon_span / self.world_width
-                        lat_step = lat_span / self.world_height
-                        cell_poly = _shape({
-                            "type": "Polygon",
-                            "coordinates": [[
-                                [lon - lon_step / 2, lat - lat_step / 2],
-                                [lon + lon_step / 2, lat - lat_step / 2],
-                                [lon + lon_step / 2, lat + lat_step / 2],
-                                [lon - lon_step / 2, lat + lat_step / 2],
-                                [lon - lon_step / 2, lat - lat_step / 2]
-                            ]]
-                        })
-                        inside = shp.intersects(cell_poly)
+                    if shp_proj is not None:
+                        inside = shp_proj.contains(_Point(px, py))
                     else:
-                        inside = fmin_lon <= lon <= fmax_lon and fmin_lat <= lat <= fmax_lat
+                        inside = fmin_x <= px <= fmax_x and fmin_y <= py <= fmax_y
                     if inside:
                         for agent in self.model.grid.get_cell_list_contents((x, y)):
                             if hasattr(agent, "altitude"):
                                 agent.altitude = alt_val
                                 assigned_positions.add((x, y))
                                 break
-
-        # ----------------- Aproximação para patches não atribuídos -----------------
         if assigned_positions:
-            max_radius = 20  # expande gradualmente até cobrir grelha inteira
+            max_radius = 20
             for agent in self.model.schedule:
                 if not hasattr(agent, "altitude"):
                     continue
                 if agent.pos in assigned_positions:
-                    continue  # já tem altitude da API
-
+                    continue
                 x0, y0 = agent.pos
                 neighbour_vals = []
                 neighbour_dists = []
@@ -1254,7 +1255,7 @@ class SimulationApp(QMainWindow):
                     for dx in range(-r, r + 1):
                         for dy in range(-r, r + 1):
                             if abs(dx) != r and abs(dy) != r:
-                                continue  # apenas borda
+                                continue
                             nx, ny = x0 + dx, y0 + dy
                             if (nx, ny) in assigned_positions and 0 <= nx < self.world_width and 0 <= ny < self.world_height:
                                 for p in self.model.grid.get_cell_list_contents((nx, ny)):
@@ -1265,11 +1266,8 @@ class SimulationApp(QMainWindow):
                     if neighbour_vals:
                         break
                 if neighbour_vals:
-                    # Peso inversamente proporcional à distância
                     weights = [1 / d for d in neighbour_dists]
                     agent.altitude = sum(v * w for v, w in zip(neighbour_vals, weights)) / sum(weights)
-
-        # ----------------- Resumo -----------------
         if altitude_vals:
             self.add_log(f"🏔️ Altitude aplicada por zonas a {len(altitude_vals)} features da API.")
         else:
@@ -1379,6 +1377,7 @@ class SimulationApp(QMainWindow):
         # 3) Atualiza visualização
         self.update_grid()
         self.add_log("🛣️ Estradas do GeoJSON desenhadas na grelha.")
+        self._snapshot_initial_state()
 
     # ------------------------------------------------------------------
     # Overpass API — estradas
@@ -1435,6 +1434,7 @@ class SimulationApp(QMainWindow):
 
         roads_geojson = {"type": "FeatureCollection", "features": road_features}
         self._draw_roads_from_geojson(roads_geojson)
+        self._snapshot_initial_state()
 
     # ------------------------------------------------------------------
     # Overpass API — edifícios
@@ -1525,6 +1525,7 @@ class SimulationApp(QMainWindow):
 
         self.update_grid()
         self.add_log("🏠 Edifícios do OSM pintados na grelha.")
+        self._snapshot_initial_state()
 
     # Override para terminar o processo Streamlit ao fechar a aplicação
     def closeEvent(self, event):
@@ -1645,7 +1646,7 @@ class SimulationApp(QMainWindow):
                     self.update_grid()
 
     def reset_environment(self):
-        """Limpa células queimadas/dangered e reinicia métricas locais."""
+        """Limpa células queimadas/dangered e reinicia métricas locais, restaurando o estado inicial da simulação."""
         if not hasattr(self, "model") or self.model is None:
             self.add_log("⚠️ Modelo ainda não iniciado.")
             return
@@ -1660,30 +1661,41 @@ class SimulationApp(QMainWindow):
                     agent.state = "forested"
                     agent.pcolor = 55
                 agent.burn_time = None
+        # Limpa métricas locais
+        self.burned_area_evol.clear()
+        self.forested_area_evol.clear()
+        self.timesteps.clear()
+        self.fire_start_positions.clear()
+        self.air_co_evol.clear()
+        self.air_co2_evol.clear()
+        self.air_pm25_evol.clear()
+        self.air_pm10_evol.clear()
+        self.air_o2_evol.clear()
+        self.temp_evol.clear()
+        self.humid_evol.clear()
+        self.precip_evol.clear()
+        self.current_iteration = 0
+        self.total_iterations = 0
+        self.is_paused = False
+        # Atualiza visualização da grid
+        self.update_grid()
+        self.add_log("🔄 Ambiente restaurado ao estado inicial da simulação.")
 
     # ------------------------------------------------------------------
     # Land cover & Forest density
     # ------------------------------------------------------------------
     def _apply_land_cover_to_model(self, api_result):
-        """Define estado dos patches (floresta/areal/etc.) conforme land_cover e
-        forest_density vindos da API. Se forest_density <1, ajusta número de
-        patches florestados aleatoriamente para reflectir densidade."""
-
         if not (self.has_setup and self.model):
             return
-
-        # Garante shapely para teste de ponto no polígono
         try:
             from shapely.geometry import shape as _shape, Point as _Point
             shapely_ok = True
         except Exception:
+            self.add_log("⚠️ Shapely não está instalado. Recomendo instalar para melhor precisão.")
             shapely_ok = False
-
         features = api_result.get("features", []) if isinstance(api_result, dict) else []
         if not features:
             return
-
-        # Reutiliza bounding box global para grid→lon/lat
         all_coords = []
         for feat in features:
             geom = feat.get("geometry", {})
@@ -1695,43 +1707,41 @@ class SimulationApp(QMainWindow):
                     all_coords.extend(poly[0])
         if not all_coords:
             return
-
         lons, lats = zip(*all_coords)
-        min_lon, max_lon = min(lons), max(lons)
-        min_lat, max_lat = min(lats), max(lats)
-        lon_span = max_lon - min_lon or 1e-9
-        lat_span = max_lat - min_lat or 1e-9
-
-        def _grid_to_lon_lat(x: int, y: int):
-            lon = min_lon + (x / (self.world_width - 1)) * lon_span
-            lat = max_lat - (y / (self.world_height - 1)) * lat_span
-            return lon, lat
-
+        xs, ys, transformer = self._project_coords(lons, lats)
+        min_x, max_x = min(xs), max(xs)
+        min_y, max_y = min(ys), max(ys)
+        padding = 0.05
+        x_span = max_x - min_x
+        y_span = max_y - min_y
+        min_x_p = min_x - x_span * padding
+        max_x_p = max_x + x_span * padding
+        min_y_p = min_y - y_span * padding
+        max_y_p = max_y + y_span * padding
+        def _grid_to_xy(x: int, y: int):
+            px = min_x_p + (x / (self.world_width - 1)) * (max_x_p - min_x_p)
+            py = max_y_p - (y / (self.world_height - 1)) * (max_y_p - min_y_p)
+            return px, py
         changes = 0
         for feat in features:
             props = feat.get("properties", {})
-            # ------------------ Inferir cobertura do solo ------------------
             land_cover = None
             for key in ("land_cover", "landcover", "landuse", "natural", "surface", "cover", "class", "type"):
                 if key in props and props[key] is not None:
                     land_cover = str(props[key]).lower()
                     break
-
-            # Se não vier etiqueta, infere usando NDVI
             ndvi_val = props.get("ndvi")
             if land_cover is None and ndvi_val is not None:
                 try:
                     ndvi_f = float(ndvi_val)
                     if ndvi_f < 0.25:
-                        land_cover = "sand"  # solo exposto / areal
+                        land_cover = "sand"
                     elif ndvi_f > 0.35:
                         land_cover = "forest"
                     else:
                         land_cover = "mixed"
                 except Exception:
                     pass
-
-            # Densidade florestal – se não existir, aproxima via NDVI
             forest_density = props.get("forest_density", props.get("forestDensity"))
             if forest_density is None and land_cover == "forest" and ndvi_val is not None:
                 try:
@@ -1739,24 +1749,22 @@ class SimulationApp(QMainWindow):
                     forest_density = max(0.1, min(1.0, (ndvi_f - 0.25) / 0.55))
                 except Exception:
                     forest_density = 1.0
-
-            # Distância à estrada (m)
             road_dist = props.get("distance_to_closest_road")
-
-            # Se nada relevante, continua
             if land_cover is None and forest_density is None:
                 continue
-
             geom = feat.get("geometry", {})
             if shapely_ok:
                 try:
                     shp = _shape(geom)
+                    # Projete o polígono para UTM
+                    if hasattr(shp, 'geoms'):
+                        shp_proj = type(shp)([[_Point(*transformer.transform(lon, lat)) for lon, lat in poly.exterior.coords] for poly in shp.geoms])
+                    else:
+                        shp_proj = type(shp)([(_Point(*transformer.transform(lon, lat))) for lon, lat in shp.exterior.coords])
                 except Exception:
-                    shp = None
+                    shp_proj = None
             else:
-                shp = None
-
-            # Bounding box da feature
+                shp_proj = None
             coords_feat = []
             gtype = geom.get("type")
             if gtype == "Polygon":
@@ -1766,55 +1774,35 @@ class SimulationApp(QMainWindow):
                     coords_feat.extend(poly[0])
             if not coords_feat:
                 continue
-
-            flons, flats = zip(*coords_feat)
-            fmin_lon, fmax_lon = min(flons), max(flons)
-            fmin_lat, fmax_lat = min(flats), max(flats)
-
-            xmin = int(round((fmin_lon - min_lon) / lon_span * (self.world_width - 1)))
-            xmax = int(round((fmax_lon - min_lon) / lon_span * (self.world_width - 1)))
-            ymin = int(round((max_lat - fmax_lat) / lat_span * (self.world_height - 1)))
-            ymax = int(round((max_lat - fmin_lat) / lat_span * (self.world_height - 1)))
+            feat_lons, feat_lats = zip(*coords_feat)
+            feat_xs, feat_ys, _ = self._project_coords(feat_lons, feat_lats)
+            fmin_x, fmax_x = min(feat_xs), max(feat_xs)
+            fmin_y, fmax_y = min(feat_ys), max(feat_ys)
+            xmin = int(round((fmin_x - min_x_p) / (max_x_p - min_x_p) * (self.world_width - 1)))
+            xmax = int(round((fmax_x - min_x_p) / (max_x_p - min_x_p) * (self.world_width - 1)))
+            ymin = int(round((max_y_p - fmax_y) / (max_y_p - min_y_p) * (self.world_height - 1)))
+            ymax = int(round((max_y_p - fmin_y) / (max_y_p - min_y_p) * (self.world_height - 1)))
             xmin, xmax = max(0, xmin), min(self.world_width - 1, xmax)
             ymin, ymax = max(0, ymin), min(self.world_height - 1, ymax)
-
             for x in range(xmin, xmax + 1):
                 for y in range(ymin, ymax + 1):
-                    lon, lat = _grid_to_lon_lat(x, y)
+                    px, py = _grid_to_xy(x, y)
                     inside = False
-                    if shp is not None:
-                        # Constrói bounding box da célula (simplificação rectangular)
-                        lon_step = lon_span / self.world_width
-                        lat_step = lat_span / self.world_height
-                        cell_poly = _shape({
-                            "type": "Polygon",
-                            "coordinates": [[
-                                [lon - lon_step / 2, lat - lat_step / 2],
-                                [lon + lon_step / 2, lat - lat_step / 2],
-                                [lon + lon_step / 2, lat + lat_step / 2],
-                                [lon - lon_step / 2, lat + lat_step / 2],
-                                [lon - lon_step / 2, lat - lat_step / 2]
-                            ]]
-                        })
-                        inside = shp.intersects(cell_poly)
+                    if shp_proj is not None:
+                        inside = shp_proj.contains(_Point(px, py))
                     else:
-                        inside = fmin_lon <= lon <= fmax_lon and fmin_lat <= lat <= fmax_lat
+                        inside = fmin_x <= px <= fmax_x and fmin_y <= py <= fmax_y
                     if not inside:
                         continue
-
                     patches = self.model.grid.get_cell_list_contents((x, y))
                     for patch in patches:
-                        # Apenas PatchAgent
                         if not hasattr(patch, "state"):
                             continue
-
-                        # --- Classificação: primeiro areia, depois floresta, por fim estrada
                         if land_cover in ("sand", "areal", "bare", "beach", "dune"):
                             patch.state = "empty"
-                            patch.pcolor = 165  # cor de areal
+                            patch.pcolor = 165
                             changes += 1
                         elif land_cover in ("forest", "wood", "tree") or forest_density is not None:
-                            # Garantir estado forestado de acordo com densidade
                             if forest_density is None:
                                 forest_density = 1.0
                             if patch.state == "empty" and random.random() < forest_density:
@@ -1827,22 +1815,18 @@ class SimulationApp(QMainWindow):
                                 patch.pcolor = 0
                                 changes += 1
                         else:
-                            # Por fim estrada se realmente muito próximo
                             is_road = False
                             if road_dist is not None:
                                 try:
-                                    is_road = float(road_dist) < 3.0  # <3 m
+                                    is_road = float(road_dist) < 3.0
                                 except Exception:
                                     pass
                             if is_road:
                                 patch.state = "road"
                                 patch.pcolor = 85
                                 changes += 1
-
         if changes:
             self.add_log(f"🌲 Cobertura do solo/densidade aplicada a {changes} patches.")
-
-        # Guarda fotografia do estado inicial após aplicar cobertura
         self._snapshot_initial_state()
 
     # ------------------------------------------------------------------
@@ -1856,7 +1840,6 @@ class SimulationApp(QMainWindow):
 
     # ------------------------------------------------------------------
     def _apply_risk_to_model(self, api_result):
-        """Atribui risk_value a cada PatchAgent conforme feature da API."""
         if not (self.has_setup and self.model):
             return
         features = api_result.get("features", []) if isinstance(api_result, dict) else []
@@ -1866,12 +1849,9 @@ class SimulationApp(QMainWindow):
             from shapely.geometry import shape as _shape, Point as _Point
             shapely_ok = True
         except Exception:
+            self.add_log("⚠️ Shapely não está instalado. Recomendo instalar para melhor precisão.")
             shapely_ok = False
-
-        # prepara matrix risks list
         self.risk_values = []
-
-        # Bounding box for conversion
         coords_all = []
         for feat in features:
             geom = feat.get("geometry", {})
@@ -1883,28 +1863,40 @@ class SimulationApp(QMainWindow):
         if not coords_all:
             return
         lons,lats = zip(*coords_all)
-        min_lon,max_lon = min(lons), max(lons)
-        min_lat,max_lat = min(lats), max(lats)
-        lon_span = max_lon - min_lon or 1e-9
-        lat_span = max_lat - min_lat or 1e-9
-
-        def _grid_to_lon_lat(x,y):
-            lon = min_lon + (x/(self.world_width-1))*lon_span
-            lat = max_lat - (y/(self.world_height-1))*lat_span
-            return lon,lat
-
-        # assign default None
+        xs, ys, transformer = self._project_coords(lons, lats)
+        min_x, max_x = min(xs), max(xs)
+        min_y, max_y = min(ys), max(ys)
+        padding = 0.05
+        x_span = max_x - min_x
+        y_span = max_y - min_y
+        min_x_p = min_x - x_span * padding
+        max_x_p = max_x + x_span * padding
+        min_y_p = min_y - y_span * padding
+        max_y_p = max_y + y_span * padding
+        def _grid_to_xy(x: int, y: int):
+            px = min_x_p + (x / (self.world_width - 1)) * (max_x_p - min_x_p)
+            py = max_y_p - (y / (self.world_height - 1)) * (max_y_p - min_y_p)
+            return px, py
         for agent in self.model.schedule:
             if hasattr(agent,"risk_value"):
                 agent.risk_value = None
-
         for feat in features:
             rv = feat.get("properties",{}).get("risk_value")
             if rv is None:
                 continue
             geom=feat.get("geometry",{})
-            shp=_shape(geom) if shapely_ok else None
-            # bounding box local
+            if shapely_ok:
+                try:
+                    shp = _shape(geom)
+                    # Projete o polígono para UTM
+                    if hasattr(shp, 'geoms'):
+                        shp_proj = type(shp)([[_Point(*transformer.transform(lon, lat)) for lon, lat in poly.exterior.coords] for poly in shp.geoms])
+                    else:
+                        shp_proj = type(shp)([(_Point(*transformer.transform(lon, lat))) for lon, lat in shp.exterior.coords])
+                except Exception:
+                    shp_proj = None
+            else:
+                shp_proj = None
             coords_feat = []
             if geom.get("type") == "Polygon":
                 coords_feat = geom.get("coordinates", [[]])[0]
@@ -1913,32 +1905,106 @@ class SimulationApp(QMainWindow):
                     coords_feat.extend(poly[0])
             if not coords_feat:
                 continue
-            flons,flats = zip(*coords_feat)
-            fmin_lon,fmax_lon = min(flons), max(flons)
-            fmin_lat,fmax_lat = min(flats), max(flats)
-            xmin = int(round((fmin_lon - min_lon)/lon_span*(self.world_width-1)))
-            xmax = int(round((fmax_lon - min_lon)/lon_span*(self.world_width-1)))
-            ymin = int(round((max_lat - fmax_lat)/lat_span*(self.world_height-1)))
-            ymax = int(round((max_lat - fmin_lat)/lat_span*(self.world_height-1)))
-            xmin,xmax = max(0,xmin), min(self.world_width-1,xmax)
-            ymin,ymax = max(0,ymin), min(self.world_height-1,ymax)
+            feat_lons, feat_lats = zip(*coords_feat)
+            feat_xs, feat_ys, _ = self._project_coords(feat_lons, feat_lats)
+            fmin_x, fmax_x = min(feat_xs), max(feat_xs)
+            fmin_y, fmax_y = min(feat_ys), max(feat_ys)
+            xmin = int(round((fmin_x - min_x_p) / (max_x_p - min_x_p) * (self.world_width - 1)))
+            xmax = int(round((fmax_x - min_x_p) / (max_x_p - min_x_p) * (self.world_width - 1)))
+            ymin = int(round((max_y_p - fmax_y) / (max_y_p - min_y_p) * (self.world_height - 1)))
+            ymax = int(round((max_y_p - fmin_y) / (max_y_p - min_y_p) * (self.world_height - 1)))
+            xmin, xmax = max(0, xmin), min(self.world_width-1,xmax)
+            ymin, ymax = max(0,ymin), min(self.world_height-1,ymax)
             for x in range(xmin,xmax+1):
                 for y in range(ymin,ymax+1):
-                    lon,lat=_grid_to_lon_lat(x,y)
+                    px, py = _grid_to_xy(x, y)
                     inside=False
-                    if shp is not None:
-                        inside = shp.contains(_Point(lon,lat))
+                    if shp_proj is not None:
+                        inside = shp_proj.contains(_Point(px, py))
                     else:
-                        inside = fmin_lon<=lon<=fmax_lon and fmin_lat<=lat<=fmax_lat
+                        inside = fmin_x<=px<=fmax_x and fmin_y<=py<=fmax_y
                     if inside:
                         for p in self.model.grid.get_cell_list_contents((x,y)):
                             p.risk_value = rv
-
-        # Collect list
         for agent in self.model.schedule:
             if hasattr(agent,"risk_value") and agent.risk_value is not None:
                 self.risk_values.append((agent.pos[0], agent.pos[1], agent.risk_value))
 
+    # Adicione uma função utilitária para calcular bounding box com padding
+    def _get_padded_bounds(self, lons, lats, padding=0.05):
+        min_lon, max_lon = min(lons), max(lons)
+        min_lat, max_lat = min(lats), max(lats)
+        lon_span = max_lon - min_lon
+        lat_span = max_lat - min_lat
+        min_lon_p = min_lon - lon_span * padding
+        max_lon_p = max_lon + lon_span * padding
+        min_lat_p = min_lat - lat_span * padding
+        max_lat_p = max_lat + lat_span * padding
+        return min_lon_p, max_lon_p, min_lat_p, max_lat_p
+
+    # Adicione método utilitário na classe SimulationApp
+    def _project_coords(self, lons, lats, utm_epsg='epsg:32629'):
+        transformer = Transformer.from_crs("epsg:4326", utm_epsg, always_xy=True)
+        xs, ys = transformer.transform(lons, lats)
+        return xs, ys, transformer
+
+    def _read_leiriaarder_points(self):
+        path = Path("components/assets/locals/leiriaarder.txt")
+        if not path.exists():
+            self.add_log("⚠️ Ficheiro leiriaarder.txt não encontrado.")
+            return None, None
+        with open(path, "r", encoding="utf-8") as f:
+            lines = f.readlines()
+        try:
+            pontoA = tuple(map(float, lines[0].split(":")[1].strip().split(",")))
+            pontoB = tuple(map(float, lines[1].split(":")[1].strip().split(",")))
+            return pontoA, pontoB
+        except Exception as e:
+            self.add_log(f"⚠️ Erro ao ler pontos de leiriaarder.txt: {e}")
+            return None, None
+
+    def _latlon_to_grid(self, lat, lon):
+        # Use o geojson atualmente carregado para calcular bounding box
+        area_path = self.selected_geojson_path
+        try:
+            geojson = json.loads(area_path.read_text(encoding="utf-8"))
+        except Exception:
+            self.add_log("[DEBUG] Erro ao ler geojson para grid.")
+            return 0, 0
+        coords = []
+        for feat in geojson.get("features", []):
+            geom = feat.get("geometry", {})
+            if geom.get("type") == "Polygon":
+                coords.extend(geom.get("coordinates", [[]])[0])
+        if not coords:
+            self.add_log("[DEBUG] GeoJSON sem coordenadas utilizáveis.")
+            return 0, 0
+        lons, lats = zip(*coords)
+        min_lon, max_lon = min(lons), max(lons)
+        min_lat, max_lat = min(lats), max(lats)
+        lon_span = max_lon - min_lon or 1e-9
+        lat_span = max_lat - min_lat or 1e-9
+        self.add_log(f"[DEBUG] Bounding box: min_lon={min_lon}, max_lon={max_lon}, min_lat={min_lat}, max_lat={max_lat}")
+        self.add_log(f"[DEBUG] Polígono: {coords}")
+        self.add_log(f"[DEBUG] Ponto de ignição recebido: lat={lat}, lon={lon}")
+        if not (min_lon <= lon <= max_lon and min_lat <= lat <= max_lat):
+            self.add_log(f"[DEBUG] Ponto ({lat}, {lon}) está FORA do bounding box do polígono!")
+        gx = int(round((lon - min_lon) / lon_span * (self.world_width - 1)))
+        gy = int(round((max_lat - lat) / lat_span * (self.world_height - 1)))
+        gx = max(0, min(self.world_width - 1, gx))
+        gy = max(0, min(self.world_height - 1, gy))
+        self.add_log(f"[DEBUG] Conversão para grid: ({gx}, {gy})")
+        return gx, gy
+
+    def ignite_at_point(self, lat, lon):
+        x, y = self._latlon_to_grid(lat, lon)
+        self.add_log(f"[DEBUG] Célula convertida para ({x}, {y}) a partir de ({lat}, {lon})")
+        if self.model.start_fire_at(x, y):
+            self.fire_start_positions.append((x, y))
+            self.add_log(f"🔥 Fogo iniciado em ({lat}, {lon}) → célula ({x}, {y})")
+            self.update_grid()
+        else:
+            self.add_log(f"⚠️ Não foi possível iniciar fogo em ({lat}, {lon}) (célula: {x}, {y})")
 
 def main():
     app = QApplication(sys.argv)
